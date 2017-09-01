@@ -53,7 +53,7 @@ def in_target_region(x):
         return False
 
 
-def run_trials(data, gen, conformal=False, c=2):
+def run_trials(data, gen, conformal=False, c=2, estimation='full'):
     """Performs and returns summary of MMD trials over various data mixtures.
 
     Inputs:
@@ -61,13 +61,15 @@ def run_trials(data, gen, conformal=False, c=2):
       gen: Two-dimensional Numpy array of generated data.
       conformal: Boolean passed to kernel() to trigger conformal map.
       c: Scalar of conformal map.
+      estimation: String flag ('sampling' or 'full').
 
     Outputs:
       stats: Dictionary of MMD statistics for one data mixture.
       med: Median of MMD statistics for one data mixture.
     """
     num_runs = 100
-    trials = [mmd(data, gen, conformal=conformal, c=c) for i in range(num_runs)]
+    trials = [mmd(data, gen, conformal=conformal, c=c, estimation=estimation)
+            for i in range(num_runs)]
     stats = {'min': round(min(trials), 2),
              'med': round(np.median(trials), 2),
              'max': round(max(trials), 2),
@@ -76,7 +78,7 @@ def run_trials(data, gen, conformal=False, c=2):
     return stats, med
 
 
-def mmd(x, y, conformal=False, c=2):
+def mmd(x, y, conformal=False, c=2, estimation='full'):
     """Compute Maximum Mean Discrepancy (MMD) between two samples.
 
     Computes mmd between two nxd Numpy arrays, representing n samples of
@@ -92,13 +94,12 @@ def mmd(x, y, conformal=False, c=2):
     Outputs:
       mmd: Scalar representing MMD.
     """
-    n = (x.shape[0]**2) / 2  # Number of samples to estimate E[k(x,y)]. 
     total_mmd1 = 0 
     total_mmd2 = 0 
     total_mmd3 = 0 
-    sampling = 0  # Toggle: Estimate vs Exact kernel value.
-    if sampling:
-        for i in range(n):
+    if estimation == 'sampling':
+        sampling_n = (x.shape[0]**2) / 10  # Number of samples to estimate E[k(x,y)]. 
+        for i in range(sampling_n):
             ind_x = np.random.randint(x.shape[0], size=2)  # Get two sample indices.
             ind_y = np.random.randint(y.shape[0], size=2)
             x1 = x[ind_x[0]]
@@ -108,6 +109,7 @@ def mmd(x, y, conformal=False, c=2):
             total_mmd1 += kernel(x1, x2, conformal=conformal, c=c) 
             total_mmd2 += kernel(y1, y2, conformal=conformal, c=c) 
             total_mmd3 += kernel(x1, y1, conformal=conformal, c=c)
+        mmd = total_mmd1/sampling_n + total_mmd2/sampling_n - 2 * total_mmd3/sampling_n
     else:
         n = x.shape[0]
         m = y.shape[0]
@@ -130,9 +132,8 @@ def mmd(x, y, conformal=False, c=2):
                 x3 = x[i]
                 y3 = y[j]
                 total_mmd3 += kernel(x3, y3, conformal=conformal, c=c) 
-
-    n_combos = n * (n - 1) / 2
-    mmd = total_mmd1/n_combos + total_mmd2/n_combos - 2 * total_mmd3/n_combos
+        n_combos = n * (n - 1) / 2
+        mmd = total_mmd1/n_combos + total_mmd2/n_combos - 2 * total_mmd3/n_combos
     return mmd
 
 
@@ -196,45 +197,48 @@ def main():
 
     # Define settings for experiment.
     n = 100
+    estimation_choices = ['sampling', 'full']
     gen_mixtures = [0.7, 0.75, 0.8, 0.85, 0.9, 0.925, 0.95, 0.975, 0.99, 0.999]
     data_mixtures = [0.9]
-    c_choices = [2]
+    c_choices = [5]
 
-    for c in c_choices:
-        print('c={}'.format(c))
+    for estimation in estimation_choices:
+        for c in c_choices:
+            for data_mix in data_mixtures:
+                print('ESTIMATION={}, C={}, PERCENT_CLUSTER_1={}'.format(
+                    estimation, c, data_mix))
+                print('conformal stats')
+                conf_medians = []
+                for gen_mix in gen_mixtures:
+                    data = generate_2d_data(n, p=data_mix)
+                    gen = generate_2d_data(n, p=gen_mix)
+                    stats, conf_median = run_trials(data, gen, conformal=True, c=c,
+                            estimation=estimation)
+                    conf_medians.append(conf_median)
+                    print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                        gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
 
-        for data_mix in data_mixtures:
-            print('data_mix={}'.format(data_mix))
-            print('conformal stats')
-            conf_medians = []
-            for gen_mix in gen_mixtures:
-                data = generate_2d_data(n, p=data_mix)
-                gen = generate_2d_data(n, p=gen_mix)
-                stats, conf_median = run_trials(data, gen, conformal=True, c=c)
-                conf_medians.append(conf_median)
-                print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
-                    gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
+                print('plain stats')
+                plain_medians = []
+                for gen_mix in gen_mixtures:
+                    data = generate_2d_data(n, p=data_mix)
+                    gen = generate_2d_data(n, p=gen_mix)
+                    stats, plain_median = run_trials(data, gen, conformal=False, c=c,
+                            estimation=estimation)
+                    plain_medians.append(plain_median)
+                    print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                        gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
 
-            print('plain stats')
-            plain_medians = []
-            for gen_mix in gen_mixtures:
-                data = generate_2d_data(n, p=data_mix)
-                gen = generate_2d_data(n, p=gen_mix)
-                stats, plain_median = run_trials(data, gen, conformal=False, c=c)
-                plain_medians.append(plain_median)
-                print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
-                    gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
-
-            fig, ax = plt.subplots()
-            ax.plot(gen_mixtures, conf_medians, label='conf')
-            ax.plot(gen_mixtures, plain_medians, label='plain')
-            ax.legend()
-            ax.set_xlabel('% gen in cluster 1')
-            ax.set_ylabel('MMD')
-            ax.set_title('Medians of MMD: n{} c{}, % Data in Cluster 1 = {}'.format(
-                n, c, data_mix))
-            plt.savefig('plots_n{}_c{}_datamix_{}.png'.format(n, c, data_mix,
-                gen_mix))
+                fig, ax = plt.subplots()
+                ax.plot(gen_mixtures, conf_medians, label='conf')
+                ax.plot(gen_mixtures, plain_medians, label='plain')
+                ax.legend()
+                ax.set_xlabel('% gen in cluster 1')
+                ax.set_ylabel('MMD')
+                ax.set_title('Medians of MMD: n{} c{}, % Data in Cluster 1 = {}'.format(
+                    n, c, data_mix))
+                plt.savefig('plots_est_{}_n{}_c{}_datamix_{}.png'.format(estimation, n, c, 
+                    data_mix, gen_mix))
     
 
 main()
