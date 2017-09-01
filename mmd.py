@@ -92,11 +92,11 @@ def mmd(x, y, conformal=False, c=2):
     Outputs:
       mmd: Scalar representing MMD.
     """
-    n = 250
+    n = (x.shape[0]**2) / 2  # Number of samples to estimate E[k(x,y)]. 
     total_mmd1 = 0 
     total_mmd2 = 0 
     total_mmd3 = 0 
-    sampling = 0
+    sampling = 0  # Toggle: Estimate vs Exact kernel value.
     if sampling:
         for i in range(n):
             ind_x = np.random.randint(x.shape[0], size=2)  # Get two sample indices.
@@ -189,15 +189,16 @@ def plot_sample(data, gen, tag=None):
 
 
 def main():
-    n = 50
-    gen_mixtures = np.arange(0.7, 1.01, 0.05)  # [0.0, 0.1, ..., 1]
-    gen_mixtures = [0.7, 0.75, 0.8, 0.85, 0.9, 0.925, 0.95, 0.975, 0.99, 0.999]
-    data_mixtures = [0.7, 0.8, 0.9, 0.95, 0.99]
     # Plot sample data for exposition.
-    data = generate_2d_data(n, p=0.9)
-    gen = generate_2d_data(n, p=0.99)
+    data = generate_2d_data(100, p=0.9)
+    gen = generate_2d_data(100, p=0.99)
     plot_sample(data, gen, tag='example')
-    c_choices = [2, 4]
+
+    # Define settings for experiment.
+    n = 100
+    gen_mixtures = [0.7, 0.75, 0.8, 0.85, 0.9, 0.925, 0.95, 0.975, 0.99, 0.999]
+    data_mixtures = [0.9]
+    c_choices = [2]
 
     for c in c_choices:
         print('c={}'.format(c))
@@ -230,9 +231,9 @@ def main():
             ax.legend()
             ax.set_xlabel('% gen in cluster 1')
             ax.set_ylabel('MMD')
-            ax.set_title('Medians of MMD: % Data in Cluster 1 = {}, n={}, c={}'.format(
-                data_mix, n, c))
-            plt.savefig('plots_n_{}_c_{}_datamix_{}.png'.format(n, c, data_mix,
+            ax.set_title('Medians of MMD: n{} c{}, % Data in Cluster 1 = {}'.format(
+                n, c, data_mix))
+            plt.savefig('plots_n{}_c{}_datamix_{}.png'.format(n, c, data_mix,
                 gen_mix))
     
 
