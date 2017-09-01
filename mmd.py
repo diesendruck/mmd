@@ -21,12 +21,14 @@ def generate_2d_data(n, p=0.9):
     center2 = [1, 1]
     n_c1 = int(np.floor(n * p))
     n_c2 = n - n_c1
+    # Define points as multivariate normal.
     c1_points = np.random.multivariate_normal(
             center1, np.identity(2) * var1, n_c1)
-    c1_points = [p for p in c1_points if not in_target_region(p)]
     c2_points = np.random.multivariate_normal(
             center2, np.identity(2) * var2, n_c2)
-    c2_points = [p for p in c2_points if in_target_region(p)]
+    # Enforce a partition among cluster points.
+    #c1_points = [p for p in c1_points if not in_target_region(p)]
+    #c2_points = [p for p in c2_points if in_target_region(p)]
     if len(c1_points) > 0 and len(c2_points) > 0:
         data = np.concatenate((c1_points, c2_points))
     elif len(c1_points) == 0 and len(c2_points) > 0:
@@ -35,6 +37,7 @@ def generate_2d_data(n, p=0.9):
         data = np.array(c1_points)
     else:
         raise ValueError('Issue with number of c1 and c2 points.')
+    assert len(data) == n
     return data
 
 
@@ -93,18 +96,43 @@ def mmd(x, y, conformal=False, c=2):
     total_mmd1 = 0 
     total_mmd2 = 0 
     total_mmd3 = 0 
-    for i in range(n):
-        ind_x = np.random.randint(x.shape[0], size=2)  # Get two sample indices.
-        ind_y = np.random.randint(y.shape[0], size=2)
-        x1 = x[ind_x[0]]
-        x2 = x[ind_x[1]]
-        y1 = y[ind_y[0]]
-        y2 = y[ind_y[1]]
-        total_mmd1 += kernel(x1, x2, conformal=conformal, c=c) 
-        total_mmd2 += kernel(y1, y2, conformal=conformal, c=c) 
-        total_mmd3 += kernel(x1, y1, conformal=conformal, c=c)
+    sampling = 0
+    if sampling:
+        for i in range(n):
+            ind_x = np.random.randint(x.shape[0], size=2)  # Get two sample indices.
+            ind_y = np.random.randint(y.shape[0], size=2)
+            x1 = x[ind_x[0]]
+            x2 = x[ind_x[1]]
+            y1 = y[ind_y[0]]
+            y2 = y[ind_y[1]]
+            total_mmd1 += kernel(x1, x2, conformal=conformal, c=c) 
+            total_mmd2 += kernel(y1, y2, conformal=conformal, c=c) 
+            total_mmd3 += kernel(x1, y1, conformal=conformal, c=c)
+    else:
+        n = x.shape[0]
+        m = y.shape[0]
+        assert n==m 
+        # Exact x-x term.
+        for i in range(n):
+            for j in range(i+1, n):
+                x1 = x[i]
+                x2 = x[j]
+                total_mmd1 += kernel(x1, x2, conformal=conformal, c=c) 
+        # Exact y-y term.
+        for i in range(m):
+            for j in range(i+1, m):
+                y1 = y[i]
+                y2 = y[j]
+                total_mmd2 += kernel(y1, y2, conformal=conformal, c=c) 
+        # Exact x-y term.
+        for i in range(n):
+            for j in range(i+1, m):
+                x3 = x[i]
+                y3 = y[j]
+                total_mmd3 += kernel(x3, y3, conformal=conformal, c=c) 
 
-    mmd = total_mmd1/n + total_mmd2/n - 2 * total_mmd3/n
+    n_combos = n * (n - 1) / 2
+    mmd = total_mmd1/n_combos + total_mmd2/n_combos - 2 * total_mmd3/n_combos
     return mmd
 
 
@@ -140,7 +168,7 @@ def kernel(a, b, conformal=False, c=2):
     return k
 
 
-def plot_sample(data, gen, tag):
+def plot_sample(data, gen, tag=None):
     """Plots one set of data and generated points.
 
     Saves to local directory.
@@ -150,49 +178,62 @@ def plot_sample(data, gen, tag):
       gen: Two-dimensional Numpy array of generated data.
       tag: String included in title.
     """
-    plt.scatter([i for i,j in data], [j for i,j in data], c='b', alpha=0.3)
-    plt.scatter([i for i,j in gen], [j for i,j in gen], c='r', alpha=0.3)
+    fig, ax = plt.subplots()
+    ax.scatter([i for i,j in data], [j for i,j in data], c='b', alpha=0.3,
+            label='data')
+    ax.scatter([i for i,j in gen], [j for i,j in gen], c='r', alpha=0.3,
+            label='gen')
+    ax.legend()
+    ax.set_title('True and Generated Data')
     plt.savefig('plot_{}.png'.format(tag))
 
 
 def main():
     n = 50
-    gen_mixtures = np.arange(0, 1.01, 0.1)  # [0.0, 0.1, ..., 1]
-    data_mixtures = np.arange(0, 1.01, 0.1)  # [0.0, 0.1, ..., 1]
-    c_choices = [1.01, 1.02, 1.04, 1.08, 1.16, 1.32]
+    gen_mixtures = np.arange(0.7, 1.01, 0.05)  # [0.0, 0.1, ..., 1]
+    gen_mixtures = [0.7, 0.75, 0.8, 0.85, 0.9, 0.925, 0.95, 0.975, 0.99, 0.999]
+    data_mixtures = [0.7, 0.8, 0.9, 0.95, 0.99]
+    # Plot sample data for exposition.
+    data = generate_2d_data(n, p=0.9)
+    gen = generate_2d_data(n, p=0.99)
+    plot_sample(data, gen, tag='example')
+    c_choices = [2, 4]
 
     for c in c_choices:
-        print('C={}'.format(c))
+        print('c={}'.format(c))
 
         for data_mix in data_mixtures:
-            print('Conformal stats')
+            print('data_mix={}'.format(data_mix))
+            print('conformal stats')
             conf_medians = []
             for gen_mix in gen_mixtures:
                 data = generate_2d_data(n, p=data_mix)
                 gen = generate_2d_data(n, p=gen_mix)
                 stats, conf_median = run_trials(data, gen, conformal=True, c=c)
                 conf_medians.append(conf_median)
-                print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
                     gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
 
-            print('Plain stats')
+            print('plain stats')
             plain_medians = []
             for gen_mix in gen_mixtures:
                 data = generate_2d_data(n, p=data_mix)
                 gen = generate_2d_data(n, p=gen_mix)
                 stats, plain_median = run_trials(data, gen, conformal=False, c=c)
                 plain_medians.append(plain_median)
-                print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                print('gen_mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
                     gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
 
             fig, ax = plt.subplots()
             ax.plot(gen_mixtures, conf_medians, label='conf')
             ax.plot(gen_mixtures, plain_medians, label='plain')
             ax.legend()
-            ax.set_xlabel('Percent true data in Cluster 1')
+            ax.set_xlabel('% gen in cluster 1')
             ax.set_ylabel('MMD')
-            ax.set_title('c_{}_datamix_{}_genmix_{}'.format(c, data_mix, gen_mix))
-            plt.savefig('plots_c_{}_datamix_{}_genmix_{}.png'.format(c, data_mix, gen_mix))
+            ax.set_title('Medians of MMD: % Data in Cluster 1 = {}, n={}, c={}'.format(
+                data_mix, n, c))
+            plt.savefig('plots_n_{}_c_{}_datamix_{}.png'.format(n, c, data_mix,
+                gen_mix))
     
 
 main()
