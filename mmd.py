@@ -38,7 +38,17 @@ def generate_2d_data(n, p=0.9):
     return data
 
 
-def mmd(x, y, conformal=False):
+def run_trials(data, gen, conformal=False, c=2):
+    num_runs = 100
+    trials = [mmd(data, gen, conformal=conformal, c=c) for i in range(num_runs)]
+    stats = {'min': round(min(trials), 2),
+             'med': round(np.median(trials), 2),
+             'max': round(max(trials), 2),
+             'var': round(np.var(trials), 2)}
+    return stats, np.median(trials) 
+
+
+def mmd(x, y, conformal=False, c=2):
     """Compute Maximum Mean Discrepancy (MMD) between two samples.
 
     Computes mmd between two nxd Numpy arrays, representing n samples of
@@ -64,22 +74,15 @@ def mmd(x, y, conformal=False):
         x2 = x[ind_x[1]]
         y1 = y[ind_y[0]]
         y2 = y[ind_y[1]]
-        total_mmd1 += kernel(x1, x2, conformal=conformal) 
-        total_mmd2 += kernel(y1, y2, conformal=conformal) 
-        total_mmd3 += kernel(x1, y1, conformal=conformal)
+        total_mmd1 += kernel(x1, x2, conformal=conformal, c=c) 
+        total_mmd2 += kernel(y1, y2, conformal=conformal, c=c) 
+        total_mmd3 += kernel(x1, y1, conformal=conformal, c=c)
 
     mmd = total_mmd1/n + total_mmd2/n - 2 * total_mmd3/n
     return mmd
 
 
-def in_target_region(x):
-    if x[0] > 0.5 and x[1] > 0.5:
-        return True
-    else:
-        return False
-
-
-def kernel(a, b, conformal=False):
+def kernel(a, b, conformal=False, c=2):
     """Gaussian Radial Basis Function.
 
     Output is between 0 and 1.
@@ -100,7 +103,6 @@ def kernel(a, b, conformal=False):
     # Apply conformal map, where D(x) is indicator of being in target region.
     # i.e. D(x) = {1, if point is in cluster 1;
     #              c, if point is in cluster 2 [the target region]} 
-    c = 1.2
     if conformal:
         # Multiply the kernel by D(x) for each kernel element a and b.
         if in_target_region(a):
@@ -111,54 +113,57 @@ def kernel(a, b, conformal=False):
     return k
 
 
-def run_trials(data, gen, conformal=False):
-    num_runs = 100
-    trials = [mmd(data, gen, conformal=conformal) for i in range(num_runs)]
-    stats = {'min': round(min(trials), 2),
-             'med': round(np.median(trials), 2),
-             'max': round(max(trials), 2),
-             'var': round(np.var(trials), 2)}
-    return stats, np.median(trials) 
+def in_target_region(x):
+    if x[0] > 0.5 and x[1] > 0.5:
+        return True
+    else:
+        return False
 
 
-def plot_sample(data, gen):
+def plot_sample(data, gen, tag):
     plt.scatter([i for i,j in data], [j for i,j in data], c='b', alpha=0.3)
     plt.scatter([i for i,j in gen], [j for i,j in gen], c='r', alpha=0.3)
-    plt.show()
+    plt.savefig('plot_{}.png'.format(tag))
 
 
 def main():
     n = 50
-    data = generate_2d_data(n, p=0.8)
-    gen = generate_2d_data(n, p=1)
-    plot_sample(data, gen)
-    various_mixtures = np.arange(0, 1.01, 0.1)  # [0.0, 0.1, ..., 1]
+    gen_mixtures = np.arange(0, 1.01, 0.1)  # [0.0, 0.1, ..., 1]
+    data_mixtures = np.arange(0, 1.01, 0.1)  # [0.0, 0.1, ..., 1]
+    c_choices = [1.01, 1.02, 1.04, 1.08, 1.16, 1.32]
 
-    print('Conformal stats')
-    conf_medians = []
-    for mix in various_mixtures:
-        data = generate_2d_data(n, p=0.5)
-        gen = generate_2d_data(n, p=mix)
-        stats, conf_median = run_trials(data, gen, conformal=True)
-        conf_medians.append(conf_median)
-        print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
-            mix, stats['min'], stats['med'], stats['max'], stats['var']))
+    for c in c_choices:
+        print('C={}'.format(c))
 
-    print('Plain stats')
-    plain_medians = []
-    for mix in various_mixtures:
-        data = generate_2d_data(n, p=0.5)
-        gen = generate_2d_data(n, p=mix)
-        stats, plain_median = run_trials(data, gen, conformal=False)
-        plain_medians.append(plain_median)
-        print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
-            mix, stats['min'], stats['med'], stats['max'], stats['var']))
+        for data_mix in data_mixtures:
+            print('Conformal stats')
+            conf_medians = []
+            for gen_mix in gen_mixtures:
+                data = generate_2d_data(n, p=data_mix)
+                gen = generate_2d_data(n, p=gen_mix)
+                stats, conf_median = run_trials(data, gen, conformal=True, c=c)
+                conf_medians.append(conf_median)
+                print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                    gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
 
-    fig, ax = plt.subplots()
-    ax.plot(conf_medians, label='conf')
-    ax.plot(plain_medians, label='plain')
-    ax.legend()
-    plt.show()
+            print('Plain stats')
+            plain_medians = []
+            for gen_mix in gen_mixtures:
+                data = generate_2d_data(n, p=data_mix)
+                gen = generate_2d_data(n, p=gen_mix)
+                stats, plain_median = run_trials(data, gen, conformal=False, c=c)
+                plain_medians.append(plain_median)
+                print('Mix: {}, MMDs: min={}, med={}, max={}, var={}'.format(
+                    gen_mix, stats['min'], stats['med'], stats['max'], stats['var']))
+
+            fig, ax = plt.subplots()
+            ax.plot(gen_mixtures, conf_medians, label='conf')
+            ax.plot(gen_mixtures, plain_medians, label='plain')
+            ax.legend()
+            ax.set_xlabel('Percent true data in Cluster 1')
+            ax.set_ylabel('MMD')
+            ax.set_title('c_{}_datamix_{}_genmix_{}'.format(c, data_mix, gen_mix))
+            plt.savefig('plots_c_{}_datamix_{}_genmix_{}.png'.format(c, data_mix, gen_mix))
     
 
 main()
