@@ -38,14 +38,39 @@ def generate_2d_data(n, p=0.9):
     return data
 
 
+def in_target_region(x):
+    """Checks if 2-dimensional Numpy array is in target region.
+
+    Inputs:
+      x: Two-dimensional Numpy array.
+    """
+    if x[0] > 0.5 and x[1] > 0.5:
+        return True
+    else:
+        return False
+
+
 def run_trials(data, gen, conformal=False, c=2):
+    """Performs and returns summary of MMD trials over various data mixtures.
+
+    Inputs:
+      data: Two-dimensional Numpy array of true data.
+      gen: Two-dimensional Numpy array of generated data.
+      conformal: Boolean passed to kernel() to trigger conformal map.
+      c: Scalar of conformal map.
+
+    Outputs:
+      stats: Dictionary of MMD statistics for one data mixture.
+      med: Median of MMD statistics for one data mixture.
+    """
     num_runs = 100
     trials = [mmd(data, gen, conformal=conformal, c=c) for i in range(num_runs)]
     stats = {'min': round(min(trials), 2),
              'med': round(np.median(trials), 2),
              'max': round(max(trials), 2),
              'var': round(np.var(trials), 2)}
-    return stats, np.median(trials) 
+    med = np.median(trials)
+    return stats, med
 
 
 def mmd(x, y, conformal=False, c=2):
@@ -59,6 +84,7 @@ def mmd(x, y, conformal=False, c=2):
       x: Numpy array of n samples.
       y: Numpy array of n samples.
       conformal: Boolean passed to kernel() to trigger conformal map.
+      c: Scalar of conformal map.
 
     Outputs:
       mmd: Scalar representing MMD.
@@ -90,7 +116,8 @@ def kernel(a, b, conformal=False, c=2):
     Inputs:
       a: A single Numpy array of dimension d.
       b: A single Numpy array of dimension d.
-      conformal: Boolean to trigger conformal map.
+      conformal: Boolean passed to kernel() to trigger conformal map.
+      c: Scalar of conformal map.
 
     Outputs:
       k: Kernel value.
@@ -113,14 +140,16 @@ def kernel(a, b, conformal=False, c=2):
     return k
 
 
-def in_target_region(x):
-    if x[0] > 0.5 and x[1] > 0.5:
-        return True
-    else:
-        return False
-
-
 def plot_sample(data, gen, tag):
+    """Plots one set of data and generated points.
+
+    Saves to local directory.
+
+    Inputs:
+      data: Two-dimensional Numpy array of true data.
+      gen: Two-dimensional Numpy array of generated data.
+      tag: String included in title.
+    """
     plt.scatter([i for i,j in data], [j for i,j in data], c='b', alpha=0.3)
     plt.scatter([i for i,j in gen], [j for i,j in gen], c='r', alpha=0.3)
     plt.savefig('plot_{}.png'.format(tag))
