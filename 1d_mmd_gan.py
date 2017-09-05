@@ -4,7 +4,7 @@ import tensorflow as tf
 layers = tf.layers
 
 # Set up true, standard normal data.
-data_num = 100
+data_num = 5
 data = np.random.randn(data_num)
 
 def get_random_z(gen_num, z_dim):
@@ -30,12 +30,16 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1, reuse=False)
 
 # Build model.
 z_dim = 5
-x = data
-z = tf.placeholder(tf.float64, [None, z_dim], name='z')
+x = tf.expand_dims(tf.constant(data), 1)
+z = tf.placeholder(tf.float64, [data_num, z_dim], name='z')
 g = generator(z)
-#c = tf.concat([x, g], 0)
-#C = tf.matmul(c, tf.transpose(c))
-#sqs_tiled_horiz = tf.reshape(tf.diag_part(C), [-1, 1]) 
+v = tf.concat([x, g], 0)
+VVT = tf.matmul(v, tf.transpose(v))
+sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
+sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
+exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+sigma = 1
+K = tf.exp(-0.5 * (1 / sigma) * exp_object)
 delta = x - g
 norm_sq = tf.reduce_mean(tf.reduce_sum(delta[:-1] * delta[1:], 1))
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
@@ -49,8 +53,11 @@ sess.run(init_op)
 for i in range(100000):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
     if i % 1000 == 0:
-        ns, z_out = sess.run([norm_sq, z], feed_dict={z: get_random_z(data_num, z_dim)})
+        ns, xx, zz, gg, dd, vv, vvtt, ss, sstt = sess.run([norm_sq, x, z, g, delta, v, VVT,sqs, sqs_tiled_horiz], feed_dict={z: get_random_z(data_num, z_dim)})
         #ns, z, g, c, x = sess.run([norm_sq, z, g, c, x], feed_dict={z: get_random_z(data_num, z_dim)})
+        print ss.shape
+        print sstt.shape
+        pdb.set_trace()
         print 'iter:{} ns = {}'.format(i, ns)
 
 
