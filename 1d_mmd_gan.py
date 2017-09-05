@@ -1,10 +1,16 @@
-import pdb
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.mlab as mlab
 import numpy as np
+import pdb
 import tensorflow as tf
 layers = tf.layers
+from scipy.stats import norm
+
 
 # Set up true, standard normal data.
-data_num = 5
+data_num = 500
 data = np.random.randn(data_num)
 
 def get_random_z(gen_num, z_dim):
@@ -13,10 +19,11 @@ def get_random_z(gen_num, z_dim):
 
 
 # Set up generator.
-width = 3
+z_dim = 20
+width = 5
 depth = 3
-activation = tf.nn.elu
 out_dim = 1
+activation = tf.nn.elu
 def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1, reuse=False):
     with tf.variable_scope('generator', reuse=reuse) as vs:
         x = layers.dense(z, width, activation=activation)
@@ -29,7 +36,6 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1, reuse=False)
 
 
 # Build model.
-z_dim = 5
 x = tf.expand_dims(tf.constant(data), 1)
 z = tf.placeholder(tf.float64, [data_num, z_dim], name='z')
 g = generator(z)
@@ -40,98 +46,36 @@ sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
 exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
 sigma = 1
 K = tf.exp(-0.5 * (1 / sigma) * exp_object)
-delta = x - g
-norm_sq = tf.reduce_mean(tf.reduce_sum(delta[:-1] * delta[1:], 1))
+K_xx = K[:data_num, :data_num]
+K_xy = K[:data_num, data_num:]
+K_yy = K[data_num:, data_num:]
+K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
+K_xy_upper = tf.matrix_band_part(K_xy, 0, -1)
+K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
+num_combos = data_num * (data_num - 1) / 2 
+mmd = (tf.reduce_sum(K_xx_upper) / num_combos -
+    2 * tf.reduce_sum(K_xy_upper) / num_combos +
+    tf.reduce_sum(K_yy_upper) / num_combos)
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
-g_optim = tf.train.AdagradOptimizer(1e-5).minimize(norm_sq, var_list=g_vars)
+g_optim = tf.train.AdagradOptimizer(1e-3).minimize(mmd, var_list=g_vars)
 
 
 # Train.
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
-for i in range(100000):
+for i in range(500000):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
     if i % 1000 == 0:
-        ns, xx, zz, gg, dd, vv, vvtt, ss, sstt = sess.run([norm_sq, x, z, g, delta, v, VVT,sqs, sqs_tiled_horiz], feed_dict={z: get_random_z(data_num, z_dim)})
-        #ns, z, g, c, x = sess.run([norm_sq, z, g, c, x], feed_dict={z: get_random_z(data_num, z_dim)})
-        print ss.shape
-        print sstt.shape
-        pdb.set_trace()
-        print 'iter:{} ns = {}'.format(i, ns)
-
-
-
-def mmd(x, y, estimation='full'):
-    """Compute Maximum Mean Discrepancy (MMD) between two samples.
-    Computes mmd between two nxd Numpy arrays, representing n samples of
-    dimension d. The Gaussian Radial Basis Function is used as the kernel
-    function.
-
-    Inputs:
-      x: Numpy array of n samples.
-      y: Numpy array of n samples.
-
-    Outputs:
-      mmd: Scalar representing MMD.
-    """
-    total_mmd1 = 0 
-    total_mmd2 = 0 
-    total_mmd3 = 0 
-    if estimation == 'sampling':
-        sampling_n = (x.shape[0]**2) / 10  # Number of samples to estimate E[k(x,y)]. 
-        for i in range(sampling_n):
-            ind_x = np.random.randint(x.shape[0], size=2)  # Get two sample indices.
-            ind_y = np.random.randint(y.shape[0], size=2)
-            x1 = x[ind_x[0]]
-            x2 = x[ind_x[1]]
-            y1 = y[ind_y[0]]
-            y2 = y[ind_y[1]]
-            total_mmd1 += kernel(x1, x2) 
-            total_mmd2 += kernel(y1, y2) 
-            total_mmd3 += kernel(x1, y1)
-        mmd = total_mmd1/sampling_n + total_mmd2/sampling_n - 2 * total_mmd3/sampling_n
-    else:
-        n = x.shape[0]
-        m = y.shape[0]
-        assert n==m 
-        # Exact x-x term.
-        for i in range(n):
-            for j in range(i+1, n):
-                x1 = x[i]
-                x2 = x[j]
-                total_mmd1 += kernel(x1, x2) 
-        # Exact y-y term.
-        for i in range(m):
-            for j in range(i+1, m):
-                y1 = y[i]
-                y2 = y[j]
-                total_mmd2 += kernel(y1, y2) 
-        # Exact x-y term.
-        for i in range(n):
-            for j in range(i+1, m):
-                x3 = x[i]
-                y3 = y[j]
-                total_mmd3 += kernel(x3, y3) 
-        n_combos = n * (n - 1) / 2
-        mmd = total_mmd1/n_combos + total_mmd2/n_combos - 2 * total_mmd3/n_combos
-    return mmd
-
-
-def kernel(a, b):
-    """Gaussian Radial Basis Function.
-    Output is between 0 and 1.
-
-    Inputs:
-      a: A single Numpy array of dimension d.
-      b: A single Numpy array of dimension d.
-
-    Outputs:
-      k: Kernel value.
-    """
-    sigma = 1  # Bandwidth of kernel.
-    a = np.array(a)
-    b = np.array(b)
-    k = np.exp(-1 * sum(np.square(a - b)) / (2 * sigma**2)) 
-
-    return k
+        mmd_out, g_out = sess.run(
+                [mmd, g], feed_dict={z: get_random_z(data_num, z_dim)})
+        print 'iter:{} mmd = {}'.format(i, mmd_out)
+        fig, ax = plt.subplots()
+        ax.hist(g_out, 50, normed=True, color='blue', alpha=0.3)
+        ax.hist(data, 50, normed=True, color='green', alpha=0.3)
+        xs = np.arange(-3, 3, 0.01)
+        ax.plot(xs, norm.pdf(xs), 'r-', alpha=0.3)
+        ax.set_ylim([0, 1.5])
+        ax.set_title('mmd = {}'.format(mmd_out))
+        plt.savefig('hist_g_out_{}'.format(i))
+        plt.close(fig)
