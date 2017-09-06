@@ -1,3 +1,4 @@
+import argparse
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -9,9 +10,24 @@ layers = tf.layers
 from scipy.stats import norm
 
 
+# Config.
+parser = argparse.ArgumentParser()
+parser.add_argument('--data_num', type=int, default=100)
+parser.add_argument('--z_dim', type=int, default=10)
+parser.add_argument('--width', type=int, default=5, help='width of generator layers')
+parser.add_argument('--depth', type=int, default=3, help='num of generator layers')
+
+args = parser.parse_args()
+data_num = args.data_num
+z_dim = args.z_dim 
+width = args.width
+depth = args.depth
+out_dim = 1
+activation = tf.nn.elu
+
 # Set up true, standard normal data.
-data_num = 500
 data = np.random.randn(data_num)
+
 
 def get_random_z(gen_num, z_dim):
     return np.random.uniform(size=[gen_num, z_dim],
@@ -19,11 +35,6 @@ def get_random_z(gen_num, z_dim):
 
 
 # Set up generator.
-z_dim = 20
-width = 5
-depth = 3
-out_dim = 1
-activation = tf.nn.elu
 def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1, reuse=False):
     with tf.variable_scope('generator', reuse=reuse) as vs:
         x = layers.dense(z, width, activation=activation)
@@ -57,16 +68,16 @@ mmd = (tf.reduce_sum(K_xx_upper) / num_combos -
     2 * tf.reduce_sum(K_xy_upper) / num_combos +
     tf.reduce_sum(K_yy_upper) / num_combos)
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
-g_optim = tf.train.AdagradOptimizer(1e-3).minimize(mmd, var_list=g_vars)
+g_optim = tf.train.AdagradOptimizer(5e-4).minimize(mmd, var_list=g_vars)
 
 
 # Train.
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
-for i in range(500000):
+for i in range(200000):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
-    if i % 1000 == 0:
+    if i % 2000 == 0:
         mmd_out, g_out = sess.run(
                 [mmd, g], feed_dict={z: get_random_z(data_num, z_dim)})
         print 'iter:{} mmd = {}'.format(i, mmd_out)
