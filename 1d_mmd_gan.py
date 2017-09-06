@@ -14,14 +14,22 @@ from scipy.stats import norm
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=100)
 parser.add_argument('--z_dim', type=int, default=10)
-parser.add_argument('--width', type=int, default=5, help='width of generator layers')
-parser.add_argument('--depth', type=int, default=3, help='num of generator layers')
+parser.add_argument('--width', type=int, default=5,
+    help='width of generator layers')
+parser.add_argument('--depth', type=int, default=3,
+    help='num of generator layers')
+parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--optimizer', type=str, default='adagrad',
+    choices=['adagrad', 'adam', 'gradientdescent'])
 
 args = parser.parse_args()
 data_num = args.data_num
 z_dim = args.z_dim 
 width = args.width
 depth = args.depth
+learning_rate = args.learning_rate
+optimizer = args.optimizer
+print(args)
 out_dim = 1
 activation = tf.nn.elu
 
@@ -68,8 +76,13 @@ mmd = (tf.reduce_sum(K_xx_upper) / num_combos -
     2 * tf.reduce_sum(K_xy_upper) / num_combos +
     tf.reduce_sum(K_yy_upper) / num_combos)
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
-g_optim = tf.train.AdagradOptimizer(5e-4).minimize(mmd, var_list=g_vars)
-
+if optimizer == 'adagrad':
+    opt = tf.train.AdagradOptimizer
+elif optimizer == 'adam':
+    opt = tf.train.AdamOptimizer
+else:
+    opt = tf.train.GradientDescentOptimizer
+g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
 
 # Train.
 init_op = tf.global_variables_initializer()
