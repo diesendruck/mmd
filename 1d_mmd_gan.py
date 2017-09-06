@@ -89,6 +89,7 @@ g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
+print(args)
 for i in range(200000):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
     if i % 50000 == 0:
