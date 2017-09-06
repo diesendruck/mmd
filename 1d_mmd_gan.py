@@ -29,7 +29,8 @@ width = args.width
 depth = args.depth
 learning_rate = args.learning_rate
 optimizer = args.optimizer
-print(args)
+save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
+    learning_rate, optimizer)
 out_dim = 1
 activation = tf.nn.elu
 
@@ -90,7 +91,7 @@ sess = tf.Session()
 sess.run(init_op)
 for i in range(200000):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
-    if i % 2000 == 0:
+    if i % 50000 == 0:
         mmd_out, g_out = sess.run(
                 [mmd, g], feed_dict={z: get_random_z(data_num, z_dim)})
         print 'iter:{} mmd = {}'.format(i, mmd_out)
@@ -101,5 +102,5 @@ for i in range(200000):
         ax.plot(xs, norm.pdf(xs), 'r-', alpha=0.3)
         ax.set_ylim([0, 1.5])
         ax.set_title('mmd = {}'.format(mmd_out))
-        plt.savefig('hist_g_out_{}'.format(i))
+        plt.savefig('hist_{}_i{}.png'.format(save_tag, i))
         plt.close(fig)
