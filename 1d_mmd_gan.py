@@ -96,7 +96,7 @@ start_time = time()
 for i in range(total_num_runs):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
 
-    if i % 50000 == 10:
+    if i % 50000 == 100:
         mmd_out, g_out = sess.run(
             [mmd, g], feed_dict={z: get_random_z(data_num, z_dim)})
         print '\niter:{} mmd = {}'.format(i, mmd_out)
@@ -117,8 +117,9 @@ for i in range(total_num_runs):
             m, s = divmod(total_est, 60)
             h, m = divmod(m, 60)
             total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-            print '\nTime (s). Elapsed: {:.2f}, Avg/iter: {:.4f}, Total est.: {}'.format(
-                elapsed_time, time_per_iter, total_est_str)
+            print ('\nTime (s). Elapsed: {:.2f}, Avg/iter: {:.4f},'
+                   ' Total est.: {}').format(elapsed_time, time_per_iter,
+                                            total_est_str)
 
     elif i % 1000 == 0:
         print '.',
