@@ -90,7 +90,7 @@ init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
 print(args)
-for i in range(200000):
+for i in range(200001):
     sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
     if i % 50000 == 0:
         mmd_out, g_out = sess.run(
