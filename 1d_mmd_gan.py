@@ -32,7 +32,7 @@ save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
                                                  learning_rate, optimizer)
 out_dim = 1
 activation = tf.nn.elu
-total_num_runs = 200001
+total_num_runs = 500101
 
 # Set up true, standard normal data.
 data = np.random.randn(data_num)
@@ -69,15 +69,14 @@ exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
 sigma = 1
 K = tf.exp(-0.5 * (1 / sigma) * exp_object)
 K_xx = K[:data_num, :data_num]
-K_xy = K[:data_num, data_num:]
 K_yy = K[data_num:, data_num:]
+K_xy = K[:data_num, data_num:]
 K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
-K_xy_upper = tf.matrix_band_part(K_xy, 0, -1)
 K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
 num_combos = data_num * (data_num - 1) / 2
-mmd = (tf.reduce_sum(K_xx_upper) / num_combos -
-       2 * tf.reduce_sum(K_xy_upper) / num_combos +
-       tf.reduce_sum(K_yy_upper) / num_combos)
+mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
+       tf.reduce_sum(K_yy_upper) / num_combos -
+       2 * tf.reduce_sum(K_xy) / (data_num * data_num))
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
     opt = tf.train.AdagradOptimizer
@@ -120,7 +119,3 @@ for i in range(total_num_runs):
             print ('\nTime (s). Elapsed: {:.2f}, Avg/iter: {:.4f},'
                    ' Total est.: {}').format(elapsed_time, time_per_iter,
                                             total_est_str)
-
-    elif i % 1000 == 0:
-        print '.',
-
