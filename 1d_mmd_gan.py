@@ -12,13 +12,13 @@ from scipy.stats import norm
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=100)
-parser.add_argument('--z_dim', type=int, default=10)
+parser.add_argument('--z_dim', type=int, default=50)
 parser.add_argument('--width', type=int, default=5,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=3,
+parser.add_argument('--depth', type=int, default=5,
                     help='num of generator layers')
-parser.add_argument('--learning_rate', type=float, default=1e-4)
-parser.add_argument('--optimizer', type=str, default='adagrad',
+parser.add_argument('--learning_rate', type=float, default=1e-3)
+parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent'])
 
 args = parser.parse_args()
@@ -32,10 +32,10 @@ save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
                                                  learning_rate, optimizer)
 out_dim = 1
 activation = tf.nn.elu
-total_num_runs = 500101
+total_num_runs = 200101
 
-# Set up true, standard normal data.
-data = np.random.randn(data_num)
+# Set up true, training data.
+data = np.random.randn(1000000)
 
 
 def get_random_z(gen_num, z_dim):
@@ -45,9 +45,10 @@ def get_random_z(gen_num, z_dim):
 
 
 # Set up generator.
-def generator(z, width=3, depth=3, activation=activation, out_dim=1, reuse=False):
+def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
+              reuse=False):
     """Generates output, given noise input."""
-    with tf.variable_scope('generator', reuse=reuse) as vs:
+    with tf.variable_scope('generator', reuse=reuse):
         x = layers.dense(z, width, activation=activation)
 
         for idx in range(depth - 1):
@@ -58,9 +59,10 @@ def generator(z, width=3, depth=3, activation=activation, out_dim=1, reuse=False
 
 
 # Build model.
-x = tf.expand_dims(tf.constant(data), 1)
+x = tf.placeholder(tf.float64, [data_num, 1], name='x')
 z = tf.placeholder(tf.float64, [data_num, z_dim], name='z')
-g = generator(z)
+g = generator(z, width=width, depth=depth, activation=activation,
+              out_dim=out_dim)
 v = tf.concat([x, g], 0)
 VVT = tf.matmul(v, tf.transpose(v))
 sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
@@ -93,15 +95,21 @@ sess.run(init_op)
 print args
 start_time = time()
 for i in range(total_num_runs):
-    sess.run(g_optim, feed_dict={z: get_random_z(data_num, z_dim)})
+    sess.run(g_optim,
+             feed_dict={
+                 z: get_random_z(data_num, z_dim),
+                 x: np.random.choice(data, (data_num, 1))})
 
     if i % 50000 == 100:
         mmd_out, g_out = sess.run(
-            [mmd, g], feed_dict={z: get_random_z(data_num, z_dim)})
+            [mmd, g], feed_dict={
+                z: get_random_z(data_num, z_dim),
+                x: np.random.choice(data, (data_num, 1))})
         print '\niter:{} mmd = {}'.format(i, mmd_out)
         fig, ax = plt.subplots()
-        ax.hist(g_out, 50, normed=True, color='blue', alpha=0.3)
-        ax.hist(data, 50, normed=True, color='green', alpha=0.3)
+        ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
+        ax.hist(np.random.randn(data_num, 1), 20, normed=True, color='green',
+                alpha=0.3)
         xs = np.arange(-3, 3, 0.01)
         ax.plot(xs, norm.pdf(xs), 'r-', alpha=0.3)
         ax.set_ylim([0, 1.5])
@@ -118,4 +126,4 @@ for i in range(total_num_runs):
             total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
             print ('\nTime (s). Elapsed: {:.2f}, Avg/iter: {:.4f},'
                    ' Total est.: {}').format(elapsed_time, time_per_iter,
-                                            total_est_str)
+                                             total_est_str)
