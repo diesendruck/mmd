@@ -11,15 +11,18 @@ from scipy.stats import norm
 
 # Config.
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_num', type=int, default=100)
-parser.add_argument('--z_dim', type=int, default=50)
-parser.add_argument('--width', type=int, default=5,
+parser.add_argument('--data_num', type=int, default=700)
+parser.add_argument('--z_dim', type=int, default=1)
+parser.add_argument('--width', type=int, default=50,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=5,
+parser.add_argument('--depth', type=int, default=4,
                     help='num of generator layers')
-parser.add_argument('--learning_rate', type=float, default=1e-3)
+parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--optimizer', type=str, default='adam',
-                    choices=['adagrad', 'adam', 'gradientdescent'])
+                    choices=['adagrad', 'adam', 'gradientdescent',
+                             'rmsprop'])
+parser.add_argument('--total_num_runs', type=int, default=200101)
+parser.add_argument('--save_iter', type=int, default=10000)
 
 args = parser.parse_args()
 data_num = args.data_num
@@ -28,11 +31,12 @@ width = args.width
 depth = args.depth
 learning_rate = args.learning_rate
 optimizer = args.optimizer
-save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
-                                                 learning_rate, optimizer)
+total_num_runs = args.total_num_runs
+save_iter = args.save_iter
 out_dim = 1
 activation = tf.nn.elu
-total_num_runs = 200101
+save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
+                                                 learning_rate, optimizer)
 
 # Set up true, training data.
 data = np.random.randn(1000000)
@@ -84,6 +88,8 @@ if optimizer == 'adagrad':
     opt = tf.train.AdagradOptimizer
 elif optimizer == 'adam':
     opt = tf.train.AdamOptimizer
+elif optimizer == 'rmsprop':
+    opt = tf.train.RMSPropOptimizer
 else:
     opt = tf.train.GradientDescentOptimizer
 g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
@@ -100,11 +106,17 @@ for i in range(total_num_runs):
                  z: get_random_z(data_num, z_dim),
                  x: np.random.choice(data, (data_num, 1))})
 
-    if i % 50000 == 100:
+    if i % save_iter == 100:
+        z_sample = get_random_z(data_num, z_dim)
+        x_sample = np.random.choice(data, (data_num, 1))
         mmd_out, g_out = sess.run(
             [mmd, g], feed_dict={
-                z: get_random_z(data_num, z_dim),
-                x: np.random.choice(data, (data_num, 1))})
+                z: z_sample,
+                x: x_sample})
+        np.save('z_sample', z_sample)
+        np.save('x_sample', x_sample)
+        np.save('g_sample', g_out)
+
         print '\niter:{} mmd = {}'.format(i, mmd_out)
         fig, ax = plt.subplots()
         ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
