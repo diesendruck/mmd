@@ -3,7 +3,7 @@ plt.style.use('ggplot')
 import numpy as np
 import pdb
 import pylab
-from scipy.stats import shapiro, probplot
+from scipy.stats import shapiro, probplot, norm
 
 
 x_orig = np.load('x_sample.npy')
@@ -32,6 +32,9 @@ plt.suptitle('Comparison: X, G, Z. ShapiroWilk(w,p)=({:.04f},{:.04f})'.format(
 plt.subplot(211)
 plt.hist(x, 20, normed=True, color='green', label='x', alpha=0.3)
 plt.hist(g, 20, normed=True, color='blue', label='g', alpha=0.3)
+xs = np.linspace(min(x), max(x), 100)
+ys = norm.pdf(xs, 0, 1)
+plt.plot(xs, ys, color='red', label='pdf', alpha=0.3)
 plt.title('Distribution comparison: X vs G')
 plt.xlabel('Values')
 plt.legend()
