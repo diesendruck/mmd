@@ -162,9 +162,9 @@ for i in range(total_num_runs):
             [mmd, g], feed_dict={
                 z: z_sample,
                 x: x_sample})
-        np.save('z_sample', z_sample)
-        np.save('x_sample', x_sample)
-        np.save('g_sample', g_out)
+        np.save('sample_z', z_sample)
+        np.save('sample_x', x_sample)
+        np.save('sample_g', g_out)
 
         print '\niter:{} mmd = {}'.format(i, mmd_out)
         print 'min:{} max= {}'.format(min(g_out), max(g_out))
