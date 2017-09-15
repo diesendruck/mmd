@@ -48,15 +48,15 @@ def generate_data(n):
       n: Number of data candidates to start with, to then be thinned.
 
     Returns:
-      data_candidates: Thinned numpy array of points.
-      data: Unthinned numpy array of points.
+      data_candidates: Unthinned numpy array of points.
+      data: Thinned numpy array of points.
     """
     n_c1 = n/2
     n_c2 = n - n_c1
     data_candidates = np.concatenate((np.random.normal(0, 1, n_c1),
                                       np.random.normal(4, 1, n_c2)))
 
-    data = np.array(thin(data_candidates))
+    data = thin(data_candidates)
     return data_candidates, data
 
 
@@ -67,29 +67,62 @@ def thin(data_candidates):
       data_candidates: List of scalar values.
 
     Returns:
-      thinned: List of scalar values, thinned according to sigmoidal fn.
+      thinned: Numpy array of values, thinned according to logistic function.
     """ 
-    # Sigmoid mapping [-Inf, Inf] to [0.9, 0.1], centered at 2.
-    def sigmoid(x):
-        p = 0.8 / (1 + np.exp(10 * (x - 2))) + 0.1
-        return p
 
-    thinned = [d for d in data_candidates if 
-               np.random.binomial(1, sigmoid(d))]
+    thinned = [candidate for candidate in data_candidates if 
+               np.random.binomial(1, prob_of_keeping(candidate))]
     return thinned 
 
 
+def prob_of_keeping(x):
+    """Logistic mapping to preferentially thin samples.
+    
+    Maps [-Inf, Inf] to [0.9, 0.1], centered at 2.
+
+    Args:
+      x: Scalar, point from original distribution.
+
+    Returns:
+      p: Probability of being thinned.
+    """
+    p = 0.8 / (1 + np.exp(10 * (x - 2))) + 0.1
+    return p
+
+
 def get_random_z(gen_num, z_dim):
-    """Generates 2d array of noise input data."""
+    """Generates 2d array of noise input data.
+    
+    Args:
+      gen_num: Number of values to generate.
+      z_dim: Dimension of each value generated.
+
+    Returns:
+      z: Numpy array of dimension gen_num x z_dim. 
+    
+    """
     #return np.random.uniform(size=[gen_num, z_dim],
     #                         low=-1.0, high=1.0)
-    return np.random.normal(0, 1, size=[gen_num, z_dim])
+    z =  np.random.normal(0, 1, size=[gen_num, z_dim])
+    return z
 
 
 # Set up generator.
 def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
               reuse=False):
-    """Generates output, given noise input."""
+    """Generates output, given noise input.
+    
+    Args:
+      z: Numpy array as the noise input to the generator.
+      width: Scalar, width of each neural net layer.
+      depth: Scalar, number of neural net layers.
+      activation: TensorFlow activation function for nodes.
+      out_dim: Scalar, dimension of generator output.
+      reuse: Flag of whether to reuse (without training).
+
+    Returns:
+      out: Numpy array of dimension z.shape[0] x out_dim. 
+    """
     with tf.variable_scope('generator', reuse=reuse):
         x = layers.dense(z, width, activation=activation)
 
@@ -98,6 +131,7 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 
         out = layers.dense(x, out_dim, activation=None)
     return out
+
 
 # Set up data.
 data_candidates, data = generate_data(starting_data_num)
@@ -133,12 +167,17 @@ elif optimizer == 'rmsprop':
     opt = tf.train.RMSPropOptimizer(learning_rate)
 else:
     opt = tf.train.GradientDescentOptimizer(learning_rate)
-# Set up objective function, and apply gradient clipping.
-#g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
-gradients, variables = zip(*opt.compute_gradients(mmd))
-gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
-g_optim = opt.apply_gradients(zip(gradients, variables))
 
+# Set up objective function, and apply gradient clipping.
+# OPTION 1
+g_optim = opt.minimize(mmd, var_list=g_vars)
+
+# OPTION 2
+#gradients, variables = zip(*opt.compute_gradients(mmd))
+#gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+#g_optim = opt.apply_gradients(zip(gradients, variables))
+
+# OPTION 3
 #gvs = opt(learning_rate).compute_gradients(mmd)
 #capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
 #g_optim = optimizer.apply_gradients(capped_gvs)
@@ -150,8 +189,24 @@ sess.run(init_op)
 print args
 start_time = time()
 for i in range(total_num_runs):
+    # Sample from generator (accounting for thinning) until size matches data.
+    g_thinned = np.array([])
+    while len(g_thinned) < data_num:
+        # Fetch a batch of candidates.
+        g_candidates = sess.run(g, feed_dict={z: get_random_z(data_num, z_dim)})
+        # Go through the batch, adding, until there are data_num candidates.
+        for candidate in g_candidates:
+            is_included = np.random.binomial(1, prob_of_keeping(candidate[0]))
+            if is_included:
+                g_thinned = np.concatenate((g_thinned, candidate))
+            if len(g_thinned) == data_num:
+                break
+    g_thinned = g_thinned.reshape(-1, 1)
+            
+    # Update generator to reduce MMD between thinned generator and data sets.
     sess.run(g_optim,
              feed_dict={
+                 g: g_thinned,
                  z: get_random_z(data_num, z_dim),
                  x: np.random.choice(data, (data_num, 1))})
 
