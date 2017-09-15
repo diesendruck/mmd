@@ -13,9 +13,9 @@ from scipy.stats import norm
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=700)
 parser.add_argument('--z_dim', type=int, default=1)
-parser.add_argument('--width', type=int, default=50,
+parser.add_argument('--width', type=int, default=10,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=4,
+parser.add_argument('--depth', type=int, default=20,
                     help='num of generator layers')
 parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--optimizer', type=str, default='adam',
@@ -44,8 +44,9 @@ data = np.random.randn(1000000)
 
 def get_random_z(gen_num, z_dim):
     """Generates 2d array of noise input data."""
-    return np.random.uniform(size=[gen_num, z_dim],
-                             low=-1.0, high=1.0)
+    #return np.random.uniform(size=[gen_num, z_dim],
+    #                         low=-1.0, high=1.0)
+    return np.random.gamma(5, size=[gen_num, z_dim])
 
 
 # Set up generator.
@@ -85,14 +86,22 @@ mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
        2 * tf.reduce_sum(K_xy) / (data_num * data_num))
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
-    opt = tf.train.AdagradOptimizer
+    opt = tf.train.AdagradOptimizer(learning_rate)
 elif optimizer == 'adam':
-    opt = tf.train.AdamOptimizer
+    opt = tf.train.AdamOptimizer(learning_rate)
 elif optimizer == 'rmsprop':
-    opt = tf.train.RMSPropOptimizer
+    opt = tf.train.RMSPropOptimizer(learning_rate)
 else:
-    opt = tf.train.GradientDescentOptimizer
-g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
+    opt = tf.train.GradientDescentOptimizer(learning_rate)
+# Set up objective function, and apply gradient clipping.
+#g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
+gradients, variables = zip(*opt.compute_gradients(mmd))
+gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+g_optim = opt.apply_gradients(zip(gradients, variables))
+
+#gvs = opt(learning_rate).compute_gradients(mmd)
+#capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+#g_optim = optimizer.apply_gradients(capped_gvs)
 
 # Train.
 init_op = tf.global_variables_initializer()
@@ -118,6 +127,7 @@ for i in range(total_num_runs):
         np.save('g_sample', g_out)
 
         print '\niter:{} mmd = {}'.format(i, mmd_out)
+        print 'min:{} max= {}'.format(min(g_out), max(g_out))
         fig, ax = plt.subplots()
         ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
         ax.hist(np.random.randn(data_num, 1), 20, normed=True, color='green',

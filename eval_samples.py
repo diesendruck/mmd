@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 import numpy as np
@@ -10,9 +12,9 @@ x_orig = np.load('x_sample.npy')
 g_orig = np.load('g_sample.npy')
 z_orig = np.load('z_sample.npy')
 
-x = x_orig.reshape(700,)
-g = g_orig.reshape(700,)
-z = z_orig.reshape(700,)
+x = x_orig.reshape(x_orig.shape[0],)
+g = g_orig.reshape(g_orig.shape[0],)
+z = z_orig.reshape(z_orig.shape[0],)
 
 # Evaluate mapping between z and g, by reordering both arrays according to one
 # of their sort orders. If they map smoothly, increase of one leads to increase
@@ -56,11 +58,11 @@ probplot(x, dist='norm', plot=pylab)
 plt.title('QQ Plot: X')
 
 plt.subplot(248)
-plt.title('Mapping from uniform z to g')
+plt.title('Mapping from noise z to g')
 plt.xlabel('Samples')
 plt.ylabel('Values z, g')
-plt.plot(z_sorted, color='black', label='z_sorted', alpha=0.3)
+plt.plot(z_sorted, color='green', label='z_sorted', alpha=0.3)
 plt.plot(g_sorted_by_z, color='blue', label='g_sorted_by_z', alpha=0.3)
 plt.legend()
 
-plt.savefig('eval_samples.png')
+plt.savefig('result_plot.png')
