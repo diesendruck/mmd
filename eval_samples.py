@@ -9,7 +9,7 @@ from scipy.stats import shapiro, probplot, norm
 
 
 x_orig = np.load('sample_x.npy')
-g_orig = np.load('sample_y.npy')
+g_orig = np.load('sample_g.npy')
 z_orig = np.load('sample_z.npy')
 
 x = x_orig.reshape(x_orig.shape[0],)
