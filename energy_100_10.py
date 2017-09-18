@@ -67,10 +67,10 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 # between the 10 proposed points and the original 100 points.
 
 # Set up true data, 100 points.
-p = np.random.randn(100)
+p = np.random.randn(10)
 
 # Initialize 10 proposal points as a uniform spread over true points.
-q = np.linspace(min(p), max(p), 10)
+q = np.linspace(min(p), max(p), 3)
 
 # Define (abbreviated) energy statistic.
 def energy(data, prop):
@@ -110,7 +110,7 @@ def energy(data, prop):
     
     return e, np.array(gradients)
 
-def optimize(data, prop, n, learning_rate):
+def optimize(data, prop, n, learning_rate, joint=False):
     """Runs alternating optimizations, n times through proposal points.
 
     Args:
@@ -118,6 +118,7 @@ def optimize(data, prop, n, learning_rate):
       prop: 1D numpy array of any length, e.g. 10.
       n: Scalar, number of times to loop through updates for all vars.
       learning_rate: Scalar, amount to move point with each gradient update.
+      joint: Boolean, whether to move proposals jointly or alternating-ly.
 
     Returns:
       prop: 1D numpy array of updated proposal points.
@@ -127,7 +128,7 @@ def optimize(data, prop, n, learning_rate):
     energies = np.array([e])
     proposal_indices = range(len(prop))
     for run in range(n):
-        if 0:
+        if not joint:
             for index in proposal_indices:
                 e, grads = energy(data, prop) 
                 prop[index] -= learning_rate * grads[index] 
@@ -142,8 +143,10 @@ def optimize(data, prop, n, learning_rate):
     plt.plot(props)
     plt.subplot(212)
     plt.plot(energies)
-    plt.savefig('props.png')
-optimize([1, 2, 3], [5, 1], 200, 0.005)
+    plt.savefig('props_joint_{}.png'.format(joint))
+    plt.close()
+optimize(p, q, 500, 0.001, joint=1)
+optimize(p, q, 500, 0.001, joint=0)
 sys.exit()
 
 
