@@ -15,7 +15,7 @@ from energy_utils import energy, main
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=3)
-parser.add_argument('--prop_num', type=int, default=2)
+parser.add_argument('--gen_num', type=int, default=2)
 parser.add_argument('--z_dim', type=int, default=1)
 parser.add_argument('--width', type=int, default=10,
                     help='width of generator layers')
@@ -30,7 +30,7 @@ parser.add_argument('--save_iter', type=int, default=1000)
 
 args = parser.parse_args()
 data_num = args.data_num
-prop_num = args.prop_num
+gen_num = args.gen_num
 z_dim = args.z_dim
 width = args.width
 depth = args.depth
@@ -40,7 +40,7 @@ total_num_runs = args.total_num_runs
 save_iter = args.save_iter
 out_dim = 1
 activation = tf.nn.elu
-save_tag = 'dn{}_pn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, prop_num, z_dim,
+save_tag = 'dn{}_pn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, gen_num, z_dim,
                                                       width, depth,
                                                       learning_rate, optimizer)
 
@@ -54,7 +54,8 @@ def get_random_z(gen_num, z_dim):
     #return np.random.uniform(size=[gen_num, z_dim],
     #                         low=-1.0, high=1.0)
     #return np.random.gamma(5, size=[gen_num, z_dim])
-    return np.random.standard_t(2, size=[gen_num, z_dim])
+    #return np.random.standard_t(2, size=[gen_num, z_dim])
+    return np.random.normal(size=[gen_num, z_dim])
 
 
 # Set up generator.
@@ -72,30 +73,33 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 
 
 # Set up true data, 100 points.
-p = np.random.randn(data_num)
-p = np.array(range(data_num))
+p = np.random.randn(data_num)  # Random normal.
+p = np.array(range(data_num))  # Fixed integer range.
 data = p
 print 'TRUE DATA: ', p
 
 # Test TensorFlow optimization.
 x = tf.placeholder(tf.float64, [data_num, 1], name='x')
-z = tf.placeholder(tf.float64, [prop_num, z_dim], name='z')
+z = tf.placeholder(tf.float64, [gen_num, z_dim], name='z')
 g = generator(z, width=width, depth=depth, activation=activation,
               out_dim=out_dim)
 v = tf.concat([x, g], 0)
-v_vert = tf.reshape(v, [-1, 1])
+
+# Nodes for energy statistic.
 v_tiled = tf.tile(v, (1, v.get_shape().as_list()[0]))
 pairwise = v_tiled - tf.transpose(v_tiled)
 energy_yx = abs(pairwise[data_num:, :data_num])
 energy_yy = abs(pairwise[data_num:, data_num:])
-between_group_term = tf.reduce_sum(energy_yx) / prop_num / data_num 
-within_proposals_term = tf.reduce_sum(energy_yy) / prop_num / prop_num 
+between_group_term = tf.reduce_sum(energy_yx) / gen_num / data_num 
+within_proposals_term = tf.reduce_sum(energy_yy) / gen_num / gen_num 
 e = 2 * between_group_term - within_proposals_term
-"""
-sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
+
+# Nodes for MMD statistic.
+vvt = tf.matmul(v, tf.transpose(v))
+sqs = tf.reshape(tf.diag_part(vvt), [-1, 1])
 sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
-exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
-sigma = 1
+exp_object = sqs_tiled_horiz - 2 * vvt + tf.transpose(sqs_tiled_horiz)
+sigma = 0.5
 K = tf.exp(-0.5 * (1 / sigma) * exp_object)
 K_xx = K[:data_num, :data_num]
 K_yy = K[data_num:, data_num:]
@@ -105,9 +109,8 @@ K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
 num_combos = data_num * (data_num - 1) / 2
 mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
        tf.reduce_sum(K_yy_upper) / num_combos -
-       2 * tf.reduce_sum(K_xy) / (data_num * data_num))
-"""
-g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
+       2 * tf.reduce_sum(K_xy) / (data_num * gen_num))
+
 if optimizer == 'adagrad':
     opt = tf.train.AdagradOptimizer(learning_rate)
 elif optimizer == 'adam':
@@ -116,44 +119,56 @@ elif optimizer == 'rmsprop':
     opt = tf.train.RMSPropOptimizer(learning_rate)
 else:
     opt = tf.train.GradientDescentOptimizer(learning_rate)
-# Set up objective function, and apply gradient clipping.
-# OPTION 1
-g_optim = opt.minimize(e, var_list=g_vars)
-# OPTION 2
-#gradients, variables = zip(*opt.compute_gradients(e))
-#gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
-#g_optim = opt.apply_gradients(zip(gradients, variables))
-# OPTION 3
-#gvs = opt(learning_rate).compute_gradients(e)
-#capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
-#g_optim = optimizer.apply_gradients(capped_gvs)
 
-# Train.
+# Set up objective function, and apply gradient clipping.
+g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
+OPTION = 1
+objective = mmd
+if OPTION == 1:
+    g_optim = opt.minimize(objective, var_list=g_vars)
+elif OPTION == 2:
+    gradients, variables = zip(*opt.compute_gradients(objective))
+    gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+    g_optim = opt.apply_gradients(zip(gradients, variables))
+elif OPTION == 3:
+    gvs = opt(learning_rate).compute_gradients(objective)
+    capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
+    g_optim = optimizer.apply_gradients(capped_gvs)
+
+# Begin training.
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
 print args
 start_time = time()
+mmd_e = []
 for i in range(total_num_runs):
     sess.run(g_optim,
              feed_dict={
-                 z: get_random_z(prop_num, z_dim),
+                 z: get_random_z(gen_num, z_dim),
                  x: data.reshape(-1, 1)})
 
     if i % save_iter == 100:
-        z_sample = get_random_z(prop_num, z_dim)
-        e_out, g_out = sess.run(
-            [e, g], feed_dict={
+        z_sample = get_random_z(gen_num, z_dim)
+        mmd_out, e_out, g_out = sess.run(
+            [mmd, e, g], feed_dict={
                 z: z_sample,
                 x: data.reshape(-1, 1)})
 
+        mmd_e.append([mmd_out, e_out])
+        print 'Iter: {}, MMD: {:.2f}, e: {:.2f}'.format(i, mmd_out, e_out)
+        if i % 1000 == 100:
+            plt.plot([i for (i, j) in mmd_e], label='mmd')
+            plt.plot([j for (i, j) in mmd_e], label='e')
+            plt.legend()
+            plt.savefig('mmd_e.png')
+            plt.close()
+            print 'saved plot'
         np.save('sample_z', z_sample)
         np.save('sample_x', data.reshape(-1, 1))
         np.save('sample_g', g_out)
 
-        print '\niter:{} e = {}'.format(i, e_out)
         print g_out
-        print 'min:{} max= {}'.format(min(g_out), max(g_out))
         """
         fig, ax = plt.subplots()
         ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
@@ -178,4 +193,3 @@ for i in range(total_num_runs):
                    ' Total est.: {}').format(elapsed_time, time_per_iter,
                                              total_est_str)
 
-main()
