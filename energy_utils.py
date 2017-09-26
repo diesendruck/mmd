@@ -50,7 +50,7 @@ def energy(data, gen):
     sqs = np.reshape(np.diag(vvt), [-1, 1])
     sqs_tiled_horiz = np.tile(sqs, (1, len(vvt)))
     exp_object = sqs_tiled_horiz - 2 * vvt + np.transpose(sqs_tiled_horiz)
-    sigma = 2.5
+    sigma = 1.
     K = np.exp(-0.5 / sigma * exp_object)
     K_xx = K[:data_num, :data_num]
     K_yy = K[data_num:, data_num:]
@@ -87,7 +87,7 @@ def energy(data, gen):
     return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
 
 
-def optimize(data, gen, n, learning_rate, joint=False, dist='e'):
+def optimize(data, gen, n, learning_rate, joint=False, dist='mmd'):
     """Runs alternating optimizations, n times through proposal points.
 
     Args:
@@ -109,17 +109,26 @@ def optimize(data, gen, n, learning_rate, joint=False, dist='e'):
     for it in range(n):
         if not joint:
             for index in proposal_indices:
+                print 'INDEX-{}'.format(index)
                 e, mmd, grads_e, grads_mmd = energy(data, gen) 
+                print 'BEFORE'
+                print 'gen: {}, mmd: {}'.format(gen, mmd)
+                print 'grads_mmd: {}'.format(grads_mmd)
                 if dist == 'e':
                     gen[index] -= learning_rate * grads_e[index] 
                 else:
                     gen[index] -= learning_rate * grads_mmd[index] 
+                e, mmd, grads_e, grads_mmd = energy(data, gen) 
+                print 'AFTER'
+                print 'gen: {}, mmd: {}'.format(gen, mmd)
+
         else:
             e, mmd, grads_e, grads_mmd = energy(data, gen) 
             if dist == 'e':
                 gen -= learning_rate * grads_e 
             else:
                 gen -= learning_rate * grads_mmd
+        pdb.set_trace()
         if it % 10000 == 0:
             print 'it{}: gen:{}, e: {:.4f}, mmd: {:.4f}'.format(it, gen, e, mmd)
         gens = np.vstack((gens, gen))
@@ -136,7 +145,7 @@ def optimize(data, gen, n, learning_rate, joint=False, dist='e'):
     plt.plot(mmds, label='mmd')
     plt.legend()
     plt.title('Energy, MMD')
-    plt.savefig('gens_joint_{}.png'.format(joint))
+    plt.savefig('energy_utils_optimize_results_{}.png'.format(joint))
     plt.close()
     
 
@@ -174,15 +183,15 @@ def test_0_2(p):
     plt.title('E({0, p}, {0, 1, 2})', fontsize=24)
 
     plt.subplots_adjust(hspace=0.5)
-    plt.savefig('e_test_0_2.png')
+    plt.savefig('energy_utils_test_e_near_0_2.png')
 
 
-def test_grid(p):
+def test_2d_grid(p):
     # Plot e and mmd over grid of {q1, q2} values.
     plt.figure(figsize=(20,8)) 
-    grid_gran = 101
-    q1 = np.linspace(-3, 6, grid_gran)[::-1]  # Reversed for imshow display.
-    q2 = np.linspace(-3, 6, grid_gran)
+    grid_gran = 11
+    q1 = np.linspace(-3, 6, grid_gran)
+    q2 = np.linspace(6, -3, grid_gran)
     energies = np.zeros([grid_gran, grid_gran])
     mmds = np.zeros([grid_gran, grid_gran])
     for i, q1_i in enumerate(q1):
@@ -192,23 +201,24 @@ def test_grid(p):
             mmds[i, j] = mmd
 
     plt.subplot(121)
-    plt.imshow(energies, interpolation='nearest',
+    plt.imshow(energies, interpolation='nearest', aspect='equal',
                extent=[q1.min(), q1.max(), q2.min(), q2.max()])
     plt.title('Energies', fontsize=24)
     plt.colorbar()
 
     plt.subplot(122)
-    plt.imshow(mmds, interpolation='nearest',
+    plt.imshow(mmds, interpolation='nearest', aspect='equal',
                extent=[q1.min(), q1.max(), q2.min(), q2.max()])
     plt.title('MMDs', fontsize=24)
     plt.colorbar()
 
     plt.subplots_adjust(hspace=0.5)
-    plt.savefig('grid_test_0_2.png')
+    plt.savefig('energy_utils_test_grid_0_2.png')
 
 
 def main():
     p = np.array([0, 1, 2])
+    p = np.random.randn(10)
     #q = np.linspace(min(p), max(p), 2)
     q = [0.5, 1.5]
     e, mmd, grads_e, grads_mmd = energy(p, q)
@@ -216,10 +226,9 @@ def main():
                                                                       grads_e,
                                                                       grads_mmd)
 
-    #test_0_2(p, q)
-    #test_grid(p)
+    #test_0_2(p)
+    test_2d_grid(p)
 
     #optimize(p, q, 300000, 1e-3, dist='mmd')
 
 
-main()
