@@ -1,5 +1,6 @@
 import matplotlib
 matplotlib.use('Agg')
+matplotlib.rcParams.update({'font.size': 25})
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 import matplotlib
@@ -34,37 +35,41 @@ def energy(data, gen):
     y = gen
     data_num = len(x)
     gen_num = len(y)
+    num_combos_yy = gen_num * (gen_num - 1) / 2.
+
+    # Compute energy.
     v = np.concatenate((x, y), 0)
     v_vert = v.reshape(-1, 1)
     v_tiled = np.tile(v_vert, (1, len(v)))
-    pairwise = v_tiled - np.transpose(v_tiled)
-    energy_xx = abs(pairwise[:len(x), :len(x)])
-    energy_yx = abs(pairwise[len(x):, :len(x)])
-    energy_yy = abs(pairwise[len(x):, len(x):])
-    between_group_term = float(np.sum(energy_yx)) / len(y) / len(x)
-    within_proposals_term = float(np.sum(energy_yy)) / len(y) / len(y) 
-    e = 2 * between_group_term - within_proposals_term
+    pairwise_difs = v_tiled - np.transpose(v_tiled)
+    energy = abs(pairwise_difs)
+    energy_yx = energy[data_num:, :data_num]
+    energy_yy = energy[data_num:, data_num:]
+    #between_group_term = float(np.sum(energy_yx)) / gen_num / data_num
+    #within_proposals_term = float(np.sum(energy_yy)) / gen_num / gen_num
+    #e = 2. * between_group_term - within_proposals_term
+    #print e
+    e = (2. / gen_num / data_num * np.sum(energy_yx) -
+         1. / gen_num / gen_num * np.sum(energy_yy))
 
     # Also compute MMD.
-    vvt = np.matmul(v_vert, np.transpose(v_vert))
-    sqs = np.reshape(np.diag(vvt), [-1, 1])
-    sqs_tiled_horiz = np.tile(sqs, (1, len(vvt)))
-    exp_object = sqs_tiled_horiz - 2 * vvt + np.transpose(sqs_tiled_horiz)
+    pairwise_prods = np.matmul(v_vert, np.transpose(v_vert))
+    sqs_vert = np.reshape(np.diag(pairwise_prods), [-1, 1])
+    sqs_vert_tiled_horiz = np.tile(sqs_vert, (1, data_num + gen_num))
+    exp_object = (sqs_vert_tiled_horiz - 2 * pairwise_prods +
+                  np.transpose(sqs_vert_tiled_horiz))
     sigma = 1.
     K = np.exp(-0.5 / sigma * exp_object)
-    K_xx = K[:data_num, :data_num]
     K_yy = K[data_num:, data_num:]
     K_xy = K[:data_num, data_num:]
-    K_xx_upper = np.triu(K_xx, 1)
     K_yy_upper = np.triu(K_yy, 1)
-    num_combos_xx = data_num * (data_num - 1) / 2
-    num_combos_yy = gen_num * (gen_num - 1) / 2
-    mmd = (np.sum(K_xx_upper) / num_combos_xx +
-           np.sum(K_yy_upper) / num_combos_yy -
-           2 * np.sum(K_xy) / (data_num * gen_num))
+    mmd = (1. / num_combos_yy * np.sum(K_yy_upper) -
+           2. / data_num / gen_num * np.sum(K_xy))
+
+
     
     # Compute energy gradients.
-    signed = np.sign(pairwise)
+    signed = np.sign(pairwise_difs)
     signed_yx = signed[data_num:, :data_num]
     signed_yy = signed[data_num:, data_num:]
     gradients_e = []
@@ -74,12 +79,15 @@ def energy(data, gen):
         gradients_e.append(grad_yi)
     
     # Compute MMD gradients.
-    mmd_grad = K * (-1 / sigma * pairwise)
+    mmd_grad = K * (-1. / sigma * pairwise_difs)
     mmd_grad_yx = mmd_grad[data_num:, :data_num] 
     mmd_grad_yy = mmd_grad[data_num:, data_num:] 
+    mmd_grad_yy_upper = np.triu(mmd_grad_yy, 1)
     gradients_mmd = []
     for i in range(gen_num):
-        grad_yi = (1. / gen_num / gen_num * sum(mmd_grad_yy[i]) -
+        grad_yi = (1. / num_combos_yy * 
+                       (sum(mmd_grad_yy_upper[i]) -
+                        sum(mmd_grad_yy_upper[:, i])) -
                    2. / gen_num / data_num * sum(mmd_grad_yx[i]))
                    
         gradients_mmd.append(grad_yi)
@@ -87,7 +95,7 @@ def energy(data, gen):
     return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
 
 
-def optimize(data, gen, n, learning_rate, joint=False, dist='mmd'):
+def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd'):
     """Runs alternating optimizations, n times through proposal points.
 
     Args:
@@ -95,7 +103,6 @@ def optimize(data, gen, n, learning_rate, joint=False, dist='mmd'):
       gen: 1D numpy array of any length, e.g. 10.
       n: Scalar, number of times to loop through updates for all vars.
       learning_rate: Scalar, amount to move point with each gradient update.
-      joint: Boolean, whether to move proposals jointly or alternating-ly.
       dist: String, distance measure ['e', 'mmd'].
 
     Returns:
@@ -107,91 +114,105 @@ def optimize(data, gen, n, learning_rate, joint=False, dist='mmd'):
     mmds = np.array([mmd])
     proposal_indices = range(len(gen))
     for it in range(n):
-        if not joint:
-            for index in proposal_indices:
-                print 'INDEX-{}'.format(index)
-                e, mmd, grads_e, grads_mmd = energy(data, gen) 
-                print 'BEFORE'
-                print 'gen: {}, mmd: {}'.format(gen, mmd)
-                print 'grads_mmd: {}'.format(grads_mmd)
-                if dist == 'e':
-                    gen[index] -= learning_rate * grads_e[index] 
-                else:
-                    gen[index] -= learning_rate * grads_mmd[index] 
-                e, mmd, grads_e, grads_mmd = energy(data, gen) 
-                print 'AFTER'
-                print 'gen: {}, mmd: {}'.format(gen, mmd)
-
-        else:
-            e, mmd, grads_e, grads_mmd = energy(data, gen) 
+        for index in proposal_indices:
+        #for index in [0]:
+            #print 'INDEX-{}'.format(index)
+            e_, mmd_, grads_e_, grads_mmd_ = energy(data, gen) 
+            #print 'BEFORE'
+            #print 'gen: {}, mmd: {}'.format(gen, mmd_)
+            #print 'grads_mmd: {}'.format(grads_mmd_)
             if dist == 'e':
-                gen -= learning_rate * grads_e 
+                gen[index] -= learning_rate * grads_e_[index] 
             else:
-                gen -= learning_rate * grads_mmd
-        pdb.set_trace()
-        if it % 10000 == 0:
-            print 'it{}: gen:{}, e: {:.4f}, mmd: {:.4f}'.format(it, gen, e, mmd)
+                gen[index] -= learning_rate * grads_mmd_[index] 
+            e, mmd, grads_e, grads_mmd = energy(data, gen) 
+            #print 'AFTER'
+            #print 'gen: {}, mmd: {}'.format(gen, mmd)
+            #print 'Change in mmd: {}'.format(mmd - mmd_)
+
+        if it % 5000 == 0:
+            print 'it{}: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(it, gen, e, mmd)
         gens = np.vstack((gens, gen))
         energies = np.vstack((energies, e))
         mmds = np.vstack((mmds, mmd))
 
-    plt.subplot(211)
-    plt.plot(gens[:, 0], label='gen0')
-    plt.plot(gens[:, 1], label='gen1')
-    plt.legend()
-    plt.title('gens')
-    plt.subplot(212)
-    plt.plot(energies, label='e')
-    plt.plot(mmds, label='mmd')
-    plt.legend()
-    plt.title('Energy, MMD')
-    plt.savefig('energy_utils_optimize_results_{}.png'.format(joint))
-    plt.close()
+    plt.plot(gens[:, 0], gens[:, 1], color='red', label='gen')
+    plt.scatter(gens[0, 0], gens[0, 1], color='red', s=50)
+    plt.scatter(gens[-1, 0], gens[-1, 1], color='red', marker='x', s=50)
     
 
-def test_0_2(p):
+def test_0_2():
+    p = np.array([0, 1, 2])
     # Show energy statistic around optimal point {0, 2}.
-    plt.figure(figsize=(20,8)) 
-    q1 = np.linspace(-1, 1, 1000)
+    plt.figure(figsize=(20,15)) 
+    q1 = np.linspace(-1.5, 1.5, 1000)
     e_test = []
     mmd_test = []
+    grad_e_test = []
+    grad_mmd_test = []
     for i in q1:
-        e, mmd, _, _ = energy(p, [i, 2])
+        e, mmd, grad_e, grad_mmd = energy(p, [i, 2])
         e_test.append(e)
         mmd_test.append(mmd)
-    plt.subplot(121)
-    plt.plot(q1, e_test, label='e')
-    plt.plot(q1, mmd_test, label='mmd')
+        grad_e_test.append(grad_e[0])
+        grad_mmd_test.append(grad_mmd[0])
+    plt.subplot(221)
+    plt.axis('equal')
+    plt.plot(q1, e_test, label='e1')
+    plt.plot(q1, mmd_test, label='mmd1')
     plt.legend()
     plt.title('E({p, 2}, {0, 1, 2})', fontsize=24)
     plt.xlabel('p', fontsize=24)
     plt.ylabel('Energy, MMD', fontsize=24)
+    plt.subplot(223)
+    plt.axis('equal')
+    plt.plot(q1, grad_e_test, label='grad_e1')
+    plt.plot(q1, grad_mmd_test, label='grad_mmd1')
+    plt.legend()
+    plt.title('Grad(E({p, 2}, {0, 1, 2}))', fontsize=24)
+    plt.xlabel('p', fontsize=24)
+    plt.ylabel('Grad(Energy, MMD)', fontsize=24)
+    
 
-    q2 = np.linspace(1, 3, 1000)
+    q2 = np.linspace(0.5, 3.5, 1000)
     e_test = []
     mmd_test = []
+    grad_e_test = []
+    grad_mmd_test = []
     for i in q2:
-        e, mmd, _, _ = energy(p, [0, i])
+        e, mmd, grad_e, grad_mmd = energy(p, [0, i])
         e_test.append(e)
         mmd_test.append(mmd)
-    plt.subplot(122)
-    plt.plot(q2, e_test, label='e')
-    plt.plot(q2, mmd_test, label='mmd')
+        grad_e_test.append(grad_e[1])
+        grad_mmd_test.append(grad_mmd[1])
+    plt.subplot(222)
+    plt.axis('equal')
+    plt.plot(q2, e_test, label='e2')
+    plt.plot(q2, mmd_test, label='mmd2')
     plt.legend()
     plt.xlabel('p', fontsize=24)
     plt.ylabel('Energy, MMD', fontsize=24)
     plt.title('E({0, p}, {0, 1, 2})', fontsize=24)
+    plt.subplot(224)
+    plt.axis('equal')
+    plt.plot(q2, grad_e_test, label='grad_e2')
+    plt.plot(q2, grad_mmd_test, label='grad_mmd2')
+    plt.legend()
+    plt.xlabel('p', fontsize=24)
+    plt.ylabel('Grad(Energy, MMD)', fontsize=24)
+    plt.title('Grad(E({0, p}, {0, 1, 2}))', fontsize=24)
 
     plt.subplots_adjust(hspace=0.5)
     plt.savefig('energy_utils_test_e_near_0_2.png')
 
 
-def test_2d_grid(p):
+def test_2d_grid():
+    p = np.array([0, 1, 2])
     # Plot e and mmd over grid of {q1, q2} values.
     plt.figure(figsize=(20,8)) 
-    grid_gran = 11
-    q1 = np.linspace(-3, 6, grid_gran)
-    q2 = np.linspace(6, -3, grid_gran)
+    grid_gran = 101
+    q1 = np.linspace(-2, 4, grid_gran)
+    q2 = np.linspace(4, -2, grid_gran)
     energies = np.zeros([grid_gran, grid_gran])
     mmds = np.zeros([grid_gran, grid_gran])
     for i, q1_i in enumerate(q1):
@@ -217,18 +238,39 @@ def test_2d_grid(p):
 
 
 def main():
-    p = np.array([0, 1, 2])
-    p = np.random.randn(10)
+    p = np.array([0, 3, 4])
+    #p = np.random.randn(10)
     #q = np.linspace(min(p), max(p), 2)
-    q = [0.5, 1.5]
+    q = [0, 0.1]
     e, mmd, grads_e, grads_mmd = energy(p, q)
     print 'e: {:.4f}, mmd: {:.4f}, grads_e: {}, grads_mmd: {}'.format(e, mmd,
                                                                       grads_e,
                                                                       grads_mmd)
+    # Do some basic tests over the grid, and near {0, 2}.
+    #test_0_2()
+    #test_2d_grid()
 
-    #test_0_2(p)
-    test_2d_grid(p)
+    # Make heatmap.
+    plt.figure(figsize=(10, 10)) 
+    grid_gran = 101
+    q1 = np.linspace(-3, 5, grid_gran)
+    q2 = np.linspace(5, -3, grid_gran)
+    energies = np.zeros([grid_gran, grid_gran])
+    mmds = np.zeros([grid_gran, grid_gran])
+    for i, q1_i in enumerate(q1):
+        for j, q2_j in enumerate(q2):
+            _, mmd, _, _ = energy(p, [q1_i, q2_j])
+            mmds[i, j] = mmd
 
-    #optimize(p, q, 300000, 1e-3, dist='mmd')
-
+    plt.imshow(mmds, interpolation='nearest', aspect='equal',
+               extent=[q1.min(), q1.max(), q2.min(), q2.max()])
+    plt.colorbar()
+    optimize(p, [0.0, 0.1], n=50000, learning_rate=1e-3)
+    optimize(p, [0.5, 3.5], n=50000, learning_rate=1e-3)
+    optimize(p, [3.8, 3.0], n=50000, learning_rate=1e-3)
+    plt.xlabel('p1')
+    plt.ylabel('p2')
+    plt.title('Q = {0, 1, 2}, P = {p1, p2}, Distance = MMD\'', fontsize=16)
+    plt.savefig('energy_utils_optimize_results.png')
+    plt.close()
 
