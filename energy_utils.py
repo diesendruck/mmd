@@ -110,10 +110,11 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd'):
     """
     e, mmd, _, _ = energy(data, gen)
     gens = np.array(gen)
-    energies = np.array([e])
-    mmds = np.array([mmd])
     proposal_indices = range(len(gen))
     for it in range(n):
+        if it > 1 and it % 100000 == 0:
+            learning_rate /= 2.
+            print 'Scaled learning rate to {}'.format(learning_rate)
         for index in proposal_indices:
         #for index in [0]:
             #print 'INDEX-{}'.format(index)
@@ -133,8 +134,6 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd'):
         if it % 5000 == 0:
             print 'it{}: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(it, gen, e, mmd)
         gens = np.vstack((gens, gen))
-        energies = np.vstack((energies, e))
-        mmds = np.vstack((mmds, mmd))
 
     plt.plot(gens[:, 0], gens[:, 1], color='red', label='gen')
     plt.scatter(gens[0, 0], gens[0, 1], color='red', s=50)
@@ -238,7 +237,7 @@ def test_2d_grid():
 
 
 def main():
-    p = np.array([0, 3, 4])
+    p = [0, 0, 0, 3, 4, 9]
     #p = np.random.randn(10)
     #q = np.linspace(min(p), max(p), 2)
     q = [0, 0.1]
@@ -246,17 +245,18 @@ def main():
     print 'e: {:.4f}, mmd: {:.4f}, grads_e: {}, grads_mmd: {}'.format(e, mmd,
                                                                       grads_e,
                                                                       grads_mmd)
+
+
     # Do some basic tests over the grid, and near {0, 2}.
     #test_0_2()
     #test_2d_grid()
 
     # Make heatmap.
     plt.figure(figsize=(10, 10)) 
-    grid_gran = 101
-    q1 = np.linspace(-3, 5, grid_gran)
-    q2 = np.linspace(5, -3, grid_gran)
-    energies = np.zeros([grid_gran, grid_gran])
-    mmds = np.zeros([grid_gran, grid_gran])
+    grid_gran = 201
+    q1 = np.linspace(10, -2, grid_gran)
+    q2 = np.linspace(-2, 10, grid_gran)
+    mmds = np.zeros([grid_gran, grid_gran], dtype=np.float64)
     for i, q1_i in enumerate(q1):
         for j, q2_j in enumerate(q2):
             _, mmd, _, _ = energy(p, [q1_i, q2_j])
@@ -265,12 +265,16 @@ def main():
     plt.imshow(mmds, interpolation='nearest', aspect='equal',
                extent=[q1.min(), q1.max(), q2.min(), q2.max()])
     plt.colorbar()
-    optimize(p, [0.0, 0.1], n=50000, learning_rate=1e-3)
-    optimize(p, [0.5, 3.5], n=50000, learning_rate=1e-3)
-    optimize(p, [3.8, 3.0], n=50000, learning_rate=1e-3)
-    plt.xlabel('p1')
-    plt.ylabel('p2')
-    plt.title('Q = {0, 1, 2}, P = {p1, p2}, Distance = MMD\'', fontsize=16)
+    n_iter = 35500
+    lr = 1e-2
+    optimize(p, [0.0, 0.1], n=n_iter, learning_rate=lr)
+    optimize(p, [0.5, 3.5], n=n_iter, learning_rate=lr)
+    optimize(p, [6.8, 3.0], n=n_iter, learning_rate=lr)
+    plt.xlabel('q1')
+    plt.ylabel('q2')
+    plt.title('P={}, Q=[q1,q2], Dist=MMD\', n={}'.format(p, n_iter),
+              fontsize=16)
     plt.savefig('energy_utils_optimize_results.png')
     plt.close()
+    pdb.set_trace()
 
