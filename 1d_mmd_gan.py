@@ -45,8 +45,6 @@ save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
 
 # Set up true, training data.
 #data = np.random.randn(1000000)
-data = np.concatenate(np.random.randn(data_num/2),
-                      np.random.randn(data_num/2)*3)
 data = np.concatenate(([0]*100, [3]*100, [4]*100)); data_num = len(data)  # TEST
 
 
