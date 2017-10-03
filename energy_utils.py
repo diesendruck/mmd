@@ -1,11 +1,11 @@
 import matplotlib
 matplotlib.use('Agg')
-matplotlib.rcParams.update({'font.size': 16})
+#matplotlib.rcParams.update({'font.size': 16})
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 import matplotlib
-matplotlib.rc('xtick', labelsize=16) 
-matplotlib.rc('ytick', labelsize=16)
+matplotlib.rc('xtick', labelsize=12) 
+matplotlib.rc('ytick', labelsize=12)
 import numpy as np
 import os
 import pdb
@@ -99,6 +99,7 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
     Returns:
       gen: 1D numpy array of updated proposal points.
     """
+
     '''
     if thin:
         # Sample from generator (accounting for thinning) until size matches data.
@@ -118,20 +119,15 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
     '''
 
     e, mmd, _, _ = energy(data, gen)
-    gens = np.array(gen)
-    proposal_indices = range(len(gen))
-    for it in range(n):
-        for index in proposal_indices:
-            e_, mmd_, grads_e_, grads_mmd_ = energy(data, gen) 
-            if dist == 'e':
-                gen[index] -= learning_rate * grads_e_[index] 
-            else:
-                gen[index] -= learning_rate * grads_mmd_[index] 
-            e, mmd, grads_e, grads_mmd = energy(data, gen) 
+    gens = np.zeros((n, len(gen)))
+    gens[0, :] = gen
+    for it in range(1, n):
+        e, mmd, grads_e, grads_mmd = energy(data, gen) 
+        gen -= learning_rate * grads_mmd 
 
         if it % 100 == 0:
             print 'it{}: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(it, gen, e, mmd)
-        gens = np.vstack((gens, gen))
+        gens[it, :] = gen
 
     return gens
     
@@ -281,17 +277,20 @@ def prob_of_keeping(x):
 
 
 def main():
-    num_data = 300
-    num_proposals = 20 
-    n_iter = 3500
-    lr = 1e-1
+    num_data = 40
+    num_proposals = 80 
+    n_iter = 50000
+    lr = 1e-2
     thin = True
+
     p_thinned, p = generate_data(num_data)
+
     half_num_data = num_data / 2
     half_num_data_ = num_data - half_num_data
     p = np.concatenate((np.random.randn(half_num_data),
                         np.random.randn(half_num_data_) + 10))
-    q = np.linspace(min(p), max(p), num_proposals)
+    q_orig = np.linspace(min(p), max(p), num_proposals)
+    q = list(q_orig)
     (low, high) = (np.floor(min(p)) - 1, np.ceil(max(p)) + 1)
 
     # Do some basic tests over the grid, and near {0, 2}.
@@ -334,11 +333,10 @@ def main():
         print 'Emailed energy_utils_optimize_results.png'
 
     else:
-        gens = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin)
-        plt.figure(figsize=(16, 12)) 
+        gens_out = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin)
         fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
         plt.suptitle('P_m ~ N(0,1), m={}, n={}'.format(len(p), len(q)))
-        ax1.plot(gens, 'k-', alpha=0.3)
+        ax1.plot(gens_out, 'k-', alpha=0.3)
         ax1.set_xlabel('Iteration')
         ax1.set_ylabel('Value of proposals Q_n')
         ax1.set_title('Proposals, Q_m')
@@ -346,9 +344,30 @@ def main():
         ax2.set_title('Data, P_n')
         plt.savefig('energy_utils_large.png')
         plt.close()
-        # Email resulting plot.
+
+        # Compare to original data.
+        offsets_before = []
+        for prop in q_orig:
+            dist_to_closest_datapoint = min(abs(prop - p))
+            offsets_before.append(dist_to_closest_datapoint)
+        last_gen = gens_out[-1, :]
+        offsets_after = []
+        for prop in last_gen:
+            dist_to_closest_datapoint = min(abs(prop - p))
+            offsets_after.append(dist_to_closest_datapoint)
+        histogram_data = np.vstack([offsets_before, offsets_after]).T
+        plt.hist(histogram_data, bins=30, alpha=0.3, label=['before', 'after'])
+        plt.legend()
+        plt.title('Offsets After Optimization. min:{:.6f}, max:{:.6f}'.format(
+            min(offsets_after),
+            max(offsets_after)))
+        plt.savefig('offsets.png')
+
+        # Email resulting plots.
         os.system(('echo $PWD | mutt momod@utexas.edu -s '
-                   '"energy_utils_large" -a "energy_utils_large.png"'))
-        print 'Emailed energy_utils_large.png'
+                   '"energy_utils_large" -a "energy_utils_large.png" '
+                   '-a "offsets.png"'))
+        print 'Emailed energy_utils_large.png, offsets.png'
+
         pdb.set_trace()
 
