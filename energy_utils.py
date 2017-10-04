@@ -1,6 +1,8 @@
+import argparse
+import math
 import matplotlib
 matplotlib.use('Agg')
-#matplotlib.rcParams.update({'font.size': 16})
+matplotlib.rcParams.update({'font.size': 12})
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
 import matplotlib
@@ -11,9 +13,30 @@ import os
 import pdb
 
 
+def str2bool(v):
+        return v.lower() in ('true', '1')
+parser = argparse.ArgumentParser()
+parser.add_argument('--num_data', type=int, default=400)
+parser.add_argument('--num_proposals', type=int, default=20)
+parser.add_argument('--lr', type=float, default=1)
+parser.add_argument('--n_iter', type=int, default=1000)
+parser.add_argument('--save_iter', type=int, default=1000)
+parser.add_argument('--thin', type=str2bool, default=False)
+args = parser.parse_args()
+num_data = args.num_data
+num_proposals = args.num_proposals
+lr = args.lr
+n_iter = args.n_iter
+save_iter = args.save_iter
+thin = args.thin
+save_tag = 'nd{}_np{}_it{}_lr{}_thin{}'.format(num_data, num_proposals,
+                                               n_iter, lr, thin)
+print 'CONFIG: {}'.format(save_tag)
+
+
 # Define (abbreviated) energy statistic.
 def energy(data, gen):
-    """Computes abbreviated energy statistic between two point sets.
+    '''Computes abbreviated energy statistic between two point sets.
     
     The smaller the value, the closer the sets.
 
@@ -26,9 +49,9 @@ def energy(data, gen):
       mmd: Scalar, the mmd between the sets.
       gradients_e: Numpy array of energy gradients for each proposal point.
       gradients_mmd: Numpy array of mmdgradients for each proposal point.
-    """
-    x = data
-    y = gen
+    '''
+    x = list(data)
+    y = list(gen)
     data_num = len(x)
     gen_num = len(y)
     num_combos_yy = gen_num * (gen_num - 1) / 2.
@@ -85,8 +108,19 @@ def energy(data, gen):
     return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
 
 
+def thin_gen(gen):
+    thinned_gen = []
+    included_indices = []
+    for i, candidate in enumerate(gen):
+        is_included = np.random.binomial(1, prob_of_keeping(candidate))
+        if is_included:
+            thinned_gen.append(candidate)
+            included_indices.append(i)
+    return thinned_gen, included_indices
+
+
 def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
-    """Runs alternating optimizations, n times through proposal points.
+    '''Runs alternating optimizations, n times through proposal points.
 
     Args:
       data: 1D numpy array of any length, e.g. 100.
@@ -98,34 +132,26 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
 
     Returns:
       gen: 1D numpy array of updated proposal points.
-    """
-
     '''
-    if thin:
-        # Sample from generator (accounting for thinning) until size matches data.
-        g_thinned = np.array([])
-        while len(g_thinned) < data_num:
-            # Fetch a batch of candidates.
-            g_candidates = sess.run(g, feed_dict={z: get_random_z(data_num, z_dim)})
-            # Go through the batch, adding, until there are data_num candidates.
-            for candidate in g_candidates:
-                is_included = np.random.binomial(1, prob_of_keeping(candidate[0]))
-                if is_included:
-                    g_thinned = np.concatenate((g_thinned, candidate))
-                    # Every time one is included, check if size matches.
-                    if len(g_thinned) == data_num:
-                        break
-        gen = g_thinned.reshape(-1, 1)
-    '''
-
     e, mmd, _, _ = energy(data, gen)
     gens = np.zeros((n, len(gen)))
+    print '\nit0: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(gen, e, mmd)
     gens[0, :] = gen
     for it in range(1, n):
-        e, mmd, grads_e, grads_mmd = energy(data, gen) 
-        gen -= learning_rate * grads_mmd 
+        if it == 5000:
+            thin = False
+        if thin:
+            thinned_gen, included_indices = thin_gen(gen)
+            e, mmd, grads_e, grads_mmd_thinned = energy(data, thinned_gen)
+            grads_mmd_padded = np.zeros(len(gen))
+            for reference_i, original_i in enumerate(included_indices):
+                grads_mmd_padded[original_i] = grads_mmd_thinned[reference_i]
+            gen -= learning_rate * grads_mmd_padded
+        else:
+            e, mmd, grads_e, grads_mmd = energy(data, gen) 
+            gen -= learning_rate * grads_mmd 
 
-        if it % 100 == 0:
+        if it % 1000 == 0:
             print 'it{}: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(it, gen, e, mmd)
         gens[it, :] = gen
 
@@ -229,7 +255,7 @@ def test_2d_grid():
 
 
 def generate_data(n):
-    """Generates true data, and applies thinning function.
+    '''Generates true data, and applies thinning function.
 
     Args:
       n: Number of data candidates to start with, to then be thinned.
@@ -237,24 +263,24 @@ def generate_data(n):
     Returns:
       data_unthinned: Unthinned numpy array of points.
       data: Thinned numpy array of points.
-    """
+    '''
     n_c2 = n/2
     n_c1 = n - n_c2
-    data_unthinned = np.concatenate((np.random.normal(0, 0, n_c1),
-        np.random.normal(2, 0, n_c2)))
+    data_unthinned = np.concatenate((np.random.normal(0, 0.2, n_c1),
+                                     np.random.normal(2, 0.2, n_c2)))
     data = thin_data(data_unthinned)
     return data_unthinned, data
 
 
 def thin_data(data_unthinned):
-    """Thins data, accepting ~90% of Cluster 1, and ~10% Cluster 2.
+    '''Thins data, accepting ~90% of Cluster 1, and ~10% Cluster 2.
 
     Args:
       data_unthinned: List of scalar values.
 
     Returns:
       thinned: Numpy array of values, thinned according to logistic function.
-    """
+    '''
 
     thinned = [candidate for candidate in data_unthinned if
                np.random.binomial(1, prob_of_keeping(candidate))]
@@ -262,7 +288,7 @@ def thin_data(data_unthinned):
 
 
 def prob_of_keeping(x):
-    """Logistic mapping to preferentially thin samples.
+    '''Logistic mapping to preferentially thin samples.
     
     Maps [-Inf, Inf] to [0.9, 0.1], centered at 2.
 
@@ -271,103 +297,106 @@ def prob_of_keeping(x):
 
     Returns:
       p: Probability of being thinned.
-    """
-    p = 0.6 / (1 + np.exp(10 * (x - 1))) + 0.4
+    '''
+    p = 0.5 / (1 + np.exp(10 * (x - 1))) + 0.5
+    #p = 0.999 / (1 + np.exp(10 * (x - 1))) + 0.001
     return p
 
 
-def main():
-    num_data = 40
-    num_proposals = 80 
-    n_iter = 50000
-    lr = 1e-2
-    thin = True
-
-    p_thinned, p = generate_data(num_data)
-
-    half_num_data = num_data / 2
-    half_num_data_ = num_data - half_num_data
-    p = np.concatenate((np.random.randn(half_num_data),
-                        np.random.randn(half_num_data_) + 10))
-    q_orig = np.linspace(min(p), max(p), num_proposals)
-    q = list(q_orig)
+def plot_two_proposal_heatmap(p, q, n_iter, lr):
+    '''Make heatmap for cases with only two proposals.
+    '''
     (low, high) = (np.floor(min(p)) - 1, np.ceil(max(p)) + 1)
+    plt.figure(figsize=(12, 12)) 
+    grid_gran = 201
+    q1 = np.linspace(high, low, grid_gran)
+    q2 = np.linspace(low, high, grid_gran)
+    mmds = np.zeros([grid_gran, grid_gran], dtype=np.float64)
+    for i, q1_i in enumerate(q1):
+        for j, q2_j in enumerate(q2):
+            _, mmd, _, _ = energy(p, [q1_i, q2_j])
+            mmds[i, j] = mmd
+    plt.imshow(mmds, interpolation='nearest', aspect='equal',
+               extent=[q1.min(), q1.max(), q2.min(), q2.max()])
+    plt.colorbar()
 
-    # Do some basic tests over the grid, and near {0, 2}.
-    TEST = 0
-    if TEST:
-        test_0_2()
-        test_2d_grid()
+    # Add optimization paths to heatmap.
+    num_paths = 3
+    for _ in range(num_paths):
+        rand1 = np.random.uniform(low, high)
+        rand2 = np.random.uniform(low, high)
+        optimize(p, [rand1, rand2], n=n_iter, learning_rate=lr)
+    plt.xlabel('q1')
+    plt.ylabel('q2')
+    plt.title('P={}, Q=[q1,q2], Dist=MMD\', it={}'.format(p, n_iter),
+              fontsize=16)
+    plt.savefig('energy_utils_optimize_results.png')
+    plt.close()
 
-    if len(q) == 2:
-        # Make heatmap.
-        plt.figure(figsize=(12, 12)) 
-        grid_gran = 201
-        q1 = np.linspace(high, low, grid_gran)
-        q2 = np.linspace(low, high, grid_gran)
-        mmds = np.zeros([grid_gran, grid_gran], dtype=np.float64)
-        for i, q1_i in enumerate(q1):
-            for j, q2_j in enumerate(q2):
-                _, mmd, _, _ = energy(p, [q1_i, q2_j])
-                mmds[i, j] = mmd
-        plt.imshow(mmds, interpolation='nearest', aspect='equal',
-                   extent=[q1.min(), q1.max(), q2.min(), q2.max()])
-        plt.colorbar()
+    # Email resulting plot.
+    os.system(('echo $PWD -- {}| mutt momod@utexas.edu -s "energy_utils_test"'
+               ' -a "energy_utils_optimize_results.png"').format(save_tag))
+    print 'Emailed energy_utils_optimize_results.png'
 
-        # Add optimization paths to heatmap.
-        num_paths = 3
-        for _ in range(num_paths):
-            rand1 = np.random.uniform(low, high)
-            rand2 = np.random.uniform(low, high)
-            optimize(p, [rand1, rand2], n=n_iter, learning_rate=lr)
-        plt.xlabel('q1')
-        plt.ylabel('q2')
-        plt.title('P={}, Q=[q1,q2], Dist=MMD\', it={}'.format(p, n_iter),
-                  fontsize=16)
-        plt.savefig('energy_utils_optimize_results.png')
-        plt.close()
 
-        # Email resulting plot.
-        os.system(('echo $PWD | mutt momod@utexas.edu -s "energy_utils_test"'
-                   ' -a "energy_utils_optimize_results.png"'))
-        print 'Emailed energy_utils_optimize_results.png'
+# BEGIN RUN.
+p_unthinned, p = generate_data(num_data)
+q_orig = np.linspace(min(p), max(p), num_proposals)
+q = list(q_orig)
 
-    else:
-        gens_out = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin)
-        fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
-        plt.suptitle('P_m ~ N(0,1), m={}, n={}'.format(len(p), len(q)))
-        ax1.plot(gens_out, 'k-', alpha=0.3)
-        ax1.set_xlabel('Iteration')
-        ax1.set_ylabel('Value of proposals Q_n')
-        ax1.set_title('Proposals, Q_m')
-        ax2.hist(p, bins=20, orientation='horizontal', color='blue', alpha=0.3)
-        ax2.set_title('Data, P_n')
-        plt.savefig('energy_utils_large.png')
-        plt.close()
+# Do some basic tests over the grid, and near {0, 2}.
+TEST = 0
+if TEST:
+    test_0_2()
+    test_2d_grid()
 
-        # Compare to original data.
-        offsets_before = []
-        for prop in q_orig:
-            dist_to_closest_datapoint = min(abs(prop - p))
-            offsets_before.append(dist_to_closest_datapoint)
-        last_gen = gens_out[-1, :]
-        offsets_after = []
-        for prop in last_gen:
-            dist_to_closest_datapoint = min(abs(prop - p))
-            offsets_after.append(dist_to_closest_datapoint)
-        histogram_data = np.vstack([offsets_before, offsets_after]).T
-        plt.hist(histogram_data, bins=30, alpha=0.3, label=['before', 'after'])
-        plt.legend()
-        plt.title('Offsets After Optimization. min:{:.6f}, max:{:.6f}'.format(
-            min(offsets_after),
-            max(offsets_after)))
-        plt.savefig('offsets.png')
+# Show results.
+if len(q) == 2:
+    plot_two_proposal_heatmap(p, q, n_iter, lr)
+else:
+    gens_out = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin)
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True, figsize=(10,6))
+    plt.suptitle('P_m ~ mixN(), m={}, n={}'.format(len(p), len(q)))
+    ax1.plot(gens_out, 'k-', alpha=0.3)
+    ax1.set_xlabel('Iteration')
+    ax1.set_ylabel('Value of proposals Q_n')
+    ax1.set_title('Proposals, Q_m')
+    ax2.hist(p, bins=30, color='green', alpha=0.3, normed=True,
+             orientation='horizontal', label='data')
+    ax2.hist(gens_out[-1, :], bins=30, color='black', alpha=0.3, normed=True,
+             orientation='horizontal', label='proposals')
+    ax2.set_title('Data, P_n')
+    ax2.legend()
+    ax3.hist(p_unthinned, bins=30,  color='blue', alpha=0.3, normed=True,
+             orientation='horizontal', label='data_unthinned')
+    ax3.set_title('Data_unthinned')
+    ax3.legend()
+    plt.savefig('energy_utils_large.png')
+    plt.close()
 
-        # Email resulting plots.
-        os.system(('echo $PWD | mutt momod@utexas.edu -s '
-                   '"energy_utils_large" -a "energy_utils_large.png" '
-                   '-a "offsets.png"'))
-        print 'Emailed energy_utils_large.png, offsets.png'
+    # Ensure that proposals aren't copies of original data.
+    offsets_before = []
+    for prop in q_orig:
+        dist_to_closest_datapoint = min(abs(prop - p))
+        offsets_before.append(dist_to_closest_datapoint)
+    last_gen = gens_out[-1, :]
+    offsets_after = []
+    for prop in last_gen:
+        dist_to_closest_datapoint = min(abs(prop - p))
+        offsets_after.append(dist_to_closest_datapoint)
+    histogram_data = np.vstack([offsets_before, offsets_after]).T
+    plt.hist(histogram_data, bins=30, alpha=0.3, label=['before', 'after'])
+    plt.legend()
+    plt.title('Proposal Offsets (after opt, min={:.5f} max={:.5f})'.format(
+        min(offsets_after),
+        max(offsets_after)))
+    plt.savefig('offsets.png')
 
-        pdb.set_trace()
+    # Email resulting plots.
+    os.system(('echo $PWD -- {} | mutt momod@utexas.edu -s '
+               '"energy_utils_large" -a "energy_utils_large.png" '
+               '-a "offsets.png"').format(save_tag))
+    print 'Emailed energy_utils_large.png, offsets.png'
+
+    pdb.set_trace()
 
