@@ -18,7 +18,8 @@ def str2bool(v):
 parser = argparse.ArgumentParser()
 parser.add_argument('--num_data', type=int, default=400)
 parser.add_argument('--num_proposals', type=int, default=20)
-parser.add_argument('--lr', type=float, default=1)
+parser.add_argument('--lr', type=float, default=1.)
+parser.add_argument('--sigma', type=float, default=1.)
 parser.add_argument('--n_iter', type=int, default=1000)
 parser.add_argument('--save_iter', type=int, default=1000)
 parser.add_argument('--thin', type=str2bool, default=False)
@@ -26,16 +27,17 @@ args = parser.parse_args()
 num_data = args.num_data
 num_proposals = args.num_proposals
 lr = args.lr
+sigma = args.sigma
 n_iter = args.n_iter
 save_iter = args.save_iter
 thin = args.thin
-save_tag = 'nd{}_np{}_it{}_lr{}_thin{}'.format(num_data, num_proposals,
-                                               n_iter, lr, thin)
+save_tag = 'nd{}_np{}_it{}_lr{}_sig{}_thin{}'.format(num_data, num_proposals,
+                                                     n_iter, lr, sigma, thin)
 print 'CONFIG: {}'.format(save_tag)
 
 
 # Define (abbreviated) energy statistic.
-def energy(data, gen):
+def energy(data, gen, sigma=1.):
     '''Computes abbreviated energy statistic between two point sets.
     
     The smaller the value, the closer the sets.
@@ -43,6 +45,7 @@ def energy(data, gen):
     Args:
       data: 1D numpy array of any length, e.g. 100.
       gen: 1D numpy array of any length, e.g. 10.
+      sigma: Float, kernel lengthscale.
 
     Returns:
       e: Scalar, the energy between the sets.
@@ -73,7 +76,7 @@ def energy(data, gen):
     sqs_vert_tiled_horiz = np.tile(sqs_vert, (1, data_num + gen_num))
     exp_object = (sqs_vert_tiled_horiz - 2 * pairwise_prods +
                   np.transpose(sqs_vert_tiled_horiz))
-    sigma = 1.
+    sigma = sigma 
     K = np.exp(-0.5 / sigma * exp_object)
     K_yy = K[data_num:, data_num:]
     K_xy = K[:data_num, data_num:]
@@ -110,16 +113,17 @@ def energy(data, gen):
 
 def thin_gen(gen):
     thinned_gen = []
-    included_indices = []
+    indices_included = []
     for i, candidate in enumerate(gen):
         is_included = np.random.binomial(1, prob_of_keeping(candidate))
         if is_included:
             thinned_gen.append(candidate)
-            included_indices.append(i)
-    return thinned_gen, included_indices
+            indices_included.append(i)
+    return thinned_gen, indices_included
 
 
-def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
+def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False,
+             sigma=1.):
     '''Runs alternating optimizations, n times through proposal points.
 
     Args:
@@ -129,30 +133,49 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False):
       learning_rate: Scalar, amount to move point with each gradient update.
       dist: String, distance measure ['e', 'mmd'].
       thin: Boolean for whether to thin proposals.
+      sigma: Float, kernel lengthscale.
 
     Returns:
       gen: 1D numpy array of updated proposal points.
     '''
-    e, mmd, _, _ = energy(data, gen)
+    e, mmd, _, _ = energy(data, gen, sigma=sigma)
     gens = np.zeros((n, len(gen)))
     print '\nit0: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(gen, e, mmd)
     gens[0, :] = gen
     for it in range(1, n):
-        if it == 5000:
-            thin = False
         if thin:
-            thinned_gen, included_indices = thin_gen(gen)
-            e, mmd, grads_e, grads_mmd_thinned = energy(data, thinned_gen)
+            # Drop some proposals, according to the thinning function, and
+            # compute gradients based only on the subset of proposals that
+            # remained.
+            # e.g. if gen were [5, 6, 7, 8], then thinned_gen could be 
+            #      [5, 6, 8], where indices_included would be [0, 1, 3]
+            thinned_gen, indices_included = thin_gen(gen)
+            _, mmd_d_tg, _, grads_mmd_d_tg = energy(data, thinned_gen,
+                                                    sigma=sigma)
+            
+            # Adjust the full set of proposals (gen), by applying gradients
+            # from the previous step, placing zeros for indices of thinned
+            # proposals.
+            # e.g. if gradients for the thinned proposals were [-1, 1, 1]
+            #      we would apply the padded gradient vector [-1, 1, 0, 1].
             grads_mmd_padded = np.zeros(len(gen))
-            for reference_i, original_i in enumerate(included_indices):
-                grads_mmd_padded[original_i] = grads_mmd_thinned[reference_i]
+            for reference_i, original_i in enumerate(indices_included):
+                grads_mmd_padded[original_i] = grads_mmd_d_tg[reference_i]
             gen -= learning_rate * grads_mmd_padded
-        else:
-            e, mmd, grads_e, grads_mmd = energy(data, gen) 
-            gen -= learning_rate * grads_mmd 
 
-        if it % 1000 == 0:
-            print 'it{}: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(it, gen, e, mmd)
+            if it % save_iter == 0:
+                # Check desired performance, i.e. gen ~= p_unthinned?
+                global p_unthinned
+                _, mmd_du_g, _, grads_mmd_du_g = energy(p_unthinned, gen,
+                                                        sigma=sigma)
+                print 'it{}: mmd_d_tg: {:.6f}, mmd_du_g: {:.6f}'.format(
+                        it, mmd_d_tg, mmd_du_g)
+        else:
+            _, mmd_d_g, _, grads_mmd_d_g = energy(data, gen, sigma=sigma) 
+            gen -= learning_rate * grads_mmd_d_g
+            if it % 1000 == 0:
+                print 'it{}: mmd_d_g: {:.6f}'.format(it, mmd_d_g)
+
         gens[it, :] = gen
 
     return gens
@@ -306,6 +329,7 @@ def prob_of_keeping(x):
 def plot_two_proposal_heatmap(p, q, n_iter, lr):
     '''Make heatmap for cases with only two proposals.
     '''
+    # Plot heatmap.
     (low, high) = (np.floor(min(p)) - 1, np.ceil(max(p)) + 1)
     plt.figure(figsize=(12, 12)) 
     grid_gran = 201
@@ -320,12 +344,14 @@ def plot_two_proposal_heatmap(p, q, n_iter, lr):
                extent=[q1.min(), q1.max(), q2.min(), q2.max()])
     plt.colorbar()
 
-    # Add optimization paths to heatmap.
+    # Run optimizations, and add paths to heatmap.
     num_paths = 3
     for _ in range(num_paths):
         rand1 = np.random.uniform(low, high)
         rand2 = np.random.uniform(low, high)
-        optimize(p, [rand1, rand2], n=n_iter, learning_rate=lr)
+        gens_out = optimize(p, [rand1, rand2], n=n_iter, learning_rate=lr)
+        # TODO: needs to also return and plot the paths.
+        #plt.plot(gens_out)
     plt.xlabel('q1')
     plt.ylabel('q2')
     plt.title('P={}, Q=[q1,q2], Dist=MMD\', it={}'.format(p, n_iter),
@@ -354,7 +380,10 @@ if TEST:
 if len(q) == 2:
     plot_two_proposal_heatmap(p, q, n_iter, lr)
 else:
-    gens_out = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin)
+    # Run optimization.
+    gens_out = optimize(p, q, n=n_iter, learning_rate=lr, thin=thin,
+                        sigma=sigma)
+    # Plot results.
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, sharey=True, figsize=(10,6))
     plt.suptitle('P_m ~ mixN(), m={}, n={}'.format(len(p), len(q)))
     ax1.plot(gens_out, 'k-', alpha=0.3)
@@ -397,6 +426,3 @@ else:
                '"energy_utils_large" -a "energy_utils_large.png" '
                '-a "offsets.png"').format(save_tag))
     print 'Emailed energy_utils_large.png, offsets.png'
-
-    pdb.set_trace()
-
