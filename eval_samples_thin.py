@@ -82,5 +82,5 @@ plt.ylabel('Generated value')
 filename = os.path.join(base_path, 'result_plot.png')
 plt.savefig(filename)
 
-os.system(('echo $PWD | mutt momod@utexas.edu -s "1dgan result_plot"'
-           ' -a "{}"').format(filename))
+os.system(('echo {} | mutt momod@utexas.edu -s "1dgan result_plot"'
+           ' -a "{}"').format(base_path, filename))
