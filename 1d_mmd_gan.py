@@ -15,17 +15,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=700)
 parser.add_argument('--gen_num', type=int, default=300)
 parser.add_argument('--z_dim', type=int, default=1)
-parser.add_argument('--width', type=int, default=10,
+parser.add_argument('--width', type=int, default=3
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=20,
+parser.add_argument('--depth', type=int, default=2,
                     help='num of generator layers')
-parser.add_argument('--sigma', type=float, default=1.)
-parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--sigma', type=float, default=0.5)
+parser.add_argument('--learning_rate', type=float, default=1e-2)
 parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
 parser.add_argument('--total_num_runs', type=int, default=200101)
-parser.add_argument('--save_iter', type=int, default=10000)
+parser.add_argument('--save_iter', type=int, default=1500)
 
 args = parser.parse_args()
 data_num = args.data_num
@@ -147,10 +147,6 @@ for i in range(total_num_runs):
 
         print '\niter:{}, mmd:{}'.format(i, mmd_out)
         print '  min:{}, max:{}'.format(min(g_out), max(g_out))
-        #print '  data: {}'.format(data)
-        #print '  z: {}'.format(z_sample)
-        #print '  g_out: {}'.format(g_out)
-        #print '  mmd: {}'.format(mmd_out)
         fig, ax = plt.subplots()
         ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
         ax.hist(np.random.randn(data_num, 1), 20, normed=True, color='green',
