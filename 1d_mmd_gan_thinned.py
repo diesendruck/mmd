@@ -17,16 +17,16 @@ def str2bool(v):
 parser = argparse.ArgumentParser()
 parser.add_argument('--starting_data_num', type=int, default=1000)
 parser.add_argument('--z_dim', type=int, default=1)
-parser.add_argument('--width', type=int, default=10,
+parser.add_argument('--width', type=int, default=3,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=20,
+parser.add_argument('--depth', type=int, default=6,
                     help='num of generator layers')
-parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
 parser.add_argument('--total_num_runs', type=int, default=200101)
-parser.add_argument('--save_iter', type=int, default=1000)
+parser.add_argument('--save_iter', type=int, default=200)
 parser.add_argument('--expt', type=str, default='test')
 parser.add_argument('--thin', type=str2bool, default=False)
 
@@ -252,7 +252,7 @@ load_checkpoints(sess, saver, checkpoints_dir)
 start_time = time()
 
 # Train.
-thin_condition = lambda x: x % 20 == 0
+thin_condition = lambda x: x % 10 == 0
 for it in range(total_num_runs):
     if thin:
         if thin_condition(it):
