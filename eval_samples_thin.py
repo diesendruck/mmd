@@ -82,5 +82,7 @@ plt.ylabel('Generated value')
 filename = os.path.join(base_path, 'result_plot.png')
 plt.savefig(filename)
 
-os.system(('echo {} | mutt momod@utexas.edu -s "1dgan result_plot"'
-           ' -a "{}"').format(base_path, filename))
+log_data = open(os.path.join(base_path, 'sample__log.txt'), 'r').read()
+log_data = log_data.replace('(',': ').replace(')', ': ')
+os.system(('echo "{}\n{}" | mutt momod@utexas.edu -s "1dgan result_plot"'
+           ' -a "{}"').format(base_path, log_data, filename))

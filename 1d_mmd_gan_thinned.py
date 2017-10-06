@@ -28,6 +28,8 @@ parser.add_argument('--optimizer', type=str, default='adam',
 parser.add_argument('--total_num_runs', type=int, default=200101)
 parser.add_argument('--save_iter', type=int, default=200)
 parser.add_argument('--expt', type=str, default='test')
+parser.add_argument('--thinning_params', type=str, default='0.5,0.5',
+                    help='parameters for prob_of_keeping function')
 parser.add_argument('--thin', type=str2bool, default=False)
 
 args = parser.parse_args()
@@ -40,6 +42,8 @@ optimizer = args.optimizer
 total_num_runs = args.total_num_runs
 save_iter = args.save_iter
 expt = args.expt
+thinning_params = args.thinning_params
+thin_a, thin_b = [float(param) for param in thinning_params.split(',')]
 thin = args.thin
 out_dim = 1
 activation = tf.nn.elu
@@ -198,17 +202,26 @@ data_num = len(data)
 
 
 # Build model.
-x = tf.placeholder(tf.float64, [data_num, 1], name='x')
-z = tf.placeholder(tf.float64, [data_num, z_dim], name='z')
+x = tf.placeholder(tf.float64, [None, 1], name='x')
+z = tf.placeholder(tf.float64, [None, z_dim], name='z')
+x_len = tf.shape(x)[0]
+z_len = tf.shape(z)[0]
 g = generator(z, width=width, depth=depth, activation=activation,
               out_dim=out_dim)
 v = tf.concat([x, g], 0)
 VVT = tf.matmul(v, tf.transpose(v))
 sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
-sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
+
+#sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape().as_list()[1])
+sqs_tiled_horiz = tf.tile(sqs, tf.shape(tf.transpose(sqs)))
 exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
 sigma = 1
-K = tf.exp(-0.5 * (1 / sigma) * exp_object)
+v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
+p1 = thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b 
+p2 = tf.transpose(p1)
+K_orig = tf.exp(-0.5 * (1 / sigma) * exp_object)
+K_weighted = p1 * p2 * K_orig 
+K = K_weighted
 K_xx = K[:data_num, :data_num]
 K_yy = K[data_num:, data_num:]
 K_xy = K[:data_num, data_num:]
@@ -218,6 +231,7 @@ num_combos = data_num * (data_num - 1) / 2
 mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
        tf.reduce_sum(K_yy_upper) / num_combos -
        2 * tf.reduce_sum(K_xy) / (data_num * data_num))
+
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
     opt = tf.train.AdagradOptimizer(learning_rate)
@@ -242,6 +256,7 @@ elif OPTION == 3:
     g_optim = optimizer.apply_gradients(capped_gvs)
 
 # Initialize session, graph, and checkpoint dir.
+print '\nCONFIG'
 print args
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
@@ -252,8 +267,9 @@ load_checkpoints(sess, saver, checkpoints_dir)
 start_time = time()
 
 # Train.
-thin_condition = lambda x: x % 10 == 0
+thin_condition = lambda x: (x % 10 == 0 or x % 11 == 0)
 for it in range(total_num_runs):
+    '''
     if thin:
         if thin_condition(it):
             # Sample from a thinned generator until size matches data.
@@ -291,6 +307,21 @@ for it in range(total_num_runs):
                      z: get_random_z(data_num, z_dim),
                      #x: np.random.choice(data, (data_num, 1))
                      x: np.reshape(data, [-1, 1])})
+    '''
+
+    sess.run(g_optim,
+             feed_dict={
+                 z: get_random_z(data_num, z_dim),
+                 #x: np.random.choice(data, (data_num, 1))
+                 x: np.reshape(data, [-1, 1])})
+
+    '''
+    vv, ss, pp1, pp2, ko, kw = sess.run([v_tiled_horiz, sqs, p1, p2, K_orig, K_weighted],
+             feed_dict={
+                 z: get_random_z(data_num, z_dim),
+                 #x: np.random.choice(data, (data_num, 1))
+                 x: np.reshape(data, [-1, 1])})
+    '''
 
     # Occasionally save and plot.
     if it % save_iter == 0:
@@ -300,14 +331,15 @@ for it in range(total_num_runs):
             [mmd, g], feed_dict={
                 z: z_sample,
                 x: x_sample})
-        if thin and thin_condition(it):
-            mmd_xgt_out = sess.run(
-                mmd, feed_dict={
-                    z: z_sample,
-                    x: x_sample,
-                    g: g_thinned})
-        else:
-            mmd_xgt_out = 99999  # Placeholder.
+        #if thin and thin_condition(it):
+        #    mmd_xgt_out = sess.run(
+        #        mmd, feed_dict={
+        #            z: z_sample,
+        #            x: x_sample,
+        #            g: g_thinned})
+        #else:
+        #    mmd_xgt_out = 99999  # Placeholder.
+        mmd_xgt_out = 99999  # Placeholder.
 
         np.save(os.path.join(logs_dir, 'sample_z.npy'), z_sample)
         np.save(os.path.join(logs_dir, 'sample_x.npy'), x_sample)
@@ -336,3 +368,5 @@ for it in range(total_num_runs):
             print ('\nTime (s). Elapsed: {:.2f}, Avg/iter: {:.4f},'
                    ' Total est.: {}').format(elapsed_time, time_per_iter,
                                              total_est_str)
+
+os.system('python eval_samples_thin.py --expt="thin"')

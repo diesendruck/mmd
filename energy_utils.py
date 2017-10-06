@@ -174,7 +174,12 @@ def optimize(data, gen, n=5000, learning_rate=1e-4, dist='mmd', thin=False,
             _, mmd_d_g, _, grads_mmd_d_g = energy(data, gen, sigma=sigma) 
             gen -= learning_rate * grads_mmd_d_g
             if it % 1000 == 0:
-                print 'it{}: mmd_d_g: {:.6f}'.format(it, mmd_d_g)
+                print '\nit{}: mmd_d_g: {:.6f}'.format(it, mmd_d_g)
+                print gen
+
+            #if it > 1 and it % 10000 == 0:
+            #    learning_rate *= 0.5
+            #    print '\nAdjusted lr to {}'.format(learning_rate)
 
         gens[it, :] = gen
 
@@ -289,8 +294,8 @@ def generate_data(n):
     '''
     n_c2 = n/2
     n_c1 = n - n_c2
-    data_unthinned = np.concatenate((np.random.normal(0, 0.2, n_c1),
-                                     np.random.normal(2, 0.2, n_c2)))
+    data_unthinned = np.concatenate((np.random.normal(0, 1, n_c1),
+                                     np.random.normal(10, 1, n_c2)))
     data = thin_data(data_unthinned)
     return data_unthinned, data
 
@@ -367,6 +372,7 @@ def plot_two_proposal_heatmap(p, q, n_iter, lr):
 
 # BEGIN RUN.
 p_unthinned, p = generate_data(num_data)
+p =  p_unthinned
 q_orig = np.linspace(min(p), max(p), num_proposals)
 q = list(q_orig)
 
@@ -400,7 +406,7 @@ else:
              orientation='horizontal', label='data_unthinned')
     ax3.set_title('Data_unthinned')
     ax3.legend()
-    plt.savefig('energy_utils_large.png')
+    plt.savefig('energy_utils_particles.png')
     plt.close()
 
     # Ensure that proposals aren't copies of original data.
@@ -419,10 +425,10 @@ else:
     plt.title('Proposal Offsets (after opt, min={:.5f} max={:.5f})'.format(
         min(offsets_after),
         max(offsets_after)))
-    plt.savefig('offsets.png')
+    plt.savefig('offsets_particles.png')
 
     # Email resulting plots.
     os.system(('echo $PWD -- {} | mutt momod@utexas.edu -s '
-               '"energy_utils_large" -a "energy_utils_large.png" '
-               '-a "offsets.png"').format(save_tag))
-    print 'Emailed energy_utils_large.png, offsets.png'
+               '"energy_utils_particles" -a "energy_utils_particles.png" '
+               '-a "offsets_particles.png"').format(save_tag))
+    print 'Emailed energy_utils_particles.png, offsets_particles.png'
