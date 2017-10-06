@@ -30,7 +30,8 @@ parser.add_argument('--save_iter', type=int, default=200)
 parser.add_argument('--expt', type=str, default='test')
 parser.add_argument('--thinning_params', type=str, default='0.5,0.5',
                     help='parameters for prob_of_keeping function')
-parser.add_argument('--thin', type=str2bool, default=False)
+parser.add_argument('--weighting', type=str, default='naive',
+                    choices=['naive', 'inverse'])
 
 args = parser.parse_args()
 starting_data_num = args.starting_data_num
@@ -44,7 +45,7 @@ save_iter = args.save_iter
 expt = args.expt
 thinning_params = args.thinning_params
 thin_a, thin_b = [float(param) for param in thinning_params.split(',')]
-thin = args.thin
+weighting= args.weighting
 out_dim = 1
 activation = tf.nn.elu
 
@@ -212,25 +213,37 @@ v = tf.concat([x, g], 0)
 VVT = tf.matmul(v, tf.transpose(v))
 sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
 
-#sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape().as_list()[1])
 sqs_tiled_horiz = tf.tile(sqs, tf.shape(tf.transpose(sqs)))
 exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
 sigma = 1
-v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
-p1 = thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b 
-p2 = tf.transpose(p1)
 K_orig = tf.exp(-0.5 * (1 / sigma) * exp_object)
-K_weighted = p1 * p2 * K_orig 
-K = K_weighted
-K_xx = K[:data_num, :data_num]
-K_yy = K[data_num:, data_num:]
-K_xy = K[:data_num, data_num:]
-K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
-K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
-num_combos = data_num * (data_num - 1) / 2
-mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
-       tf.reduce_sum(K_yy_upper) / num_combos -
-       2 * tf.reduce_sum(K_xy) / (data_num * data_num))
+v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
+if weighting == 'naive':
+    # Define kernel with naive weights from thinning function, over entire kernel. 
+    p1 = thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b 
+    p2 = tf.transpose(p1)
+    K_weighted_naive = p1 * p2 * K_orig
+    K = K_weighted_naive
+    K_xx = K[:data_num, :data_num]
+    K_yy = K[data_num:, data_num:]
+    K_xy = K[:data_num, data_num:]
+    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
+    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
+    num_combos = data_num * (data_num - 1) / 2
+    mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
+           tf.reduce_sum(K_yy_upper) / num_combos -
+           2 * tf.reduce_sum(K_xy) / (data_num * data_num))
+elif weighting == 'inverse':
+    # Define kernel with inverse weights, over only data terms of kernel. 
+    p1_inverse = 1. / (thin_a / (1 + tf.exp(10 * (v_tiled_horiz -1))) + thin_b)
+    p2_inverse = tf.transpose(p1_inverse)
+    Kw_xy = (K_orig[:data_num, data_num:] * p1_inverse[:data_num, data_num:])
+    Kw_xy_upper = tf.matrix_band_part(Kw_xy, 0, -1) - tf.matrix_band_part(Kw_xy, 0, 0) 
+    K_yy = K_orig[data_num:, data_num:]
+    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
+    num_combos = data_num * (data_num - 1) / 2
+    mmd = (tf.reduce_sum(K_yy_upper) / num_combos -
+           2 * tf.reduce_sum(Kw_xy) / (data_num * data_num))
 
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
@@ -256,8 +269,6 @@ elif OPTION == 3:
     g_optim = optimizer.apply_gradients(capped_gvs)
 
 # Initialize session, graph, and checkpoint dir.
-print '\nCONFIG'
-print args
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
@@ -267,6 +278,8 @@ load_checkpoints(sess, saver, checkpoints_dir)
 start_time = time()
 
 # Train.
+print '\nCONFIG'
+print args
 thin_condition = lambda x: (x % 10 == 0 or x % 11 == 0)
 for it in range(total_num_runs):
     '''
