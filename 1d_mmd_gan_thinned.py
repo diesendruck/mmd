@@ -22,6 +22,7 @@ parser.add_argument('--width', type=int, default=3,
 parser.add_argument('--depth', type=int, default=6,
                     help='num of generator layers')
 parser.add_argument('--learning_rate', type=float, default=1e-3)
+parser.add_argument('--sigma', type=float, default=1.)
 parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
@@ -31,7 +32,9 @@ parser.add_argument('--expt', type=str, default='test')
 parser.add_argument('--thinning_params', type=str, default='0.5,0.5',
                     help='parameters for prob_of_keeping function')
 parser.add_argument('--weighting', type=str, default='naive',
-                    choices=['naive', 'inverse'])
+                    choices=['naive', 'inverse', 'none'])
+parser.add_argument('--gradient_clipping', type=str, default='none',
+                    choices=['none', 'opt1', 'opt2'])
 
 args = parser.parse_args()
 starting_data_num = args.starting_data_num
@@ -39,13 +42,15 @@ z_dim = args.z_dim
 width = args.width
 depth = args.depth
 learning_rate = args.learning_rate
+sigma = args.sigma
 optimizer = args.optimizer
 total_num_runs = args.total_num_runs
 save_iter = args.save_iter
 expt = args.expt
 thinning_params = args.thinning_params
 thin_a, thin_b = [float(param) for param in thinning_params.split(',')]
-weighting= args.weighting
+weighting = args.weighting
+gradient_clipping = args.gradient_clipping
 out_dim = 1
 activation = tf.nn.elu
 
@@ -201,7 +206,6 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 data_unthinned, data = generate_data(starting_data_num)
 data_num = len(data)
 
-
 # Build model.
 x = tf.placeholder(tf.float64, [None, 1], name='x')
 z = tf.placeholder(tf.float64, [None, z_dim], name='z')
@@ -215,35 +219,54 @@ sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
 
 sqs_tiled_horiz = tf.tile(sqs, tf.shape(tf.transpose(sqs)))
 exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
-sigma = 1
+sigma = sigma 
 K_orig = tf.exp(-0.5 * (1 / sigma) * exp_object)
 v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
-if weighting == 'naive':
-    # Define kernel with naive weights from thinning function, over entire kernel. 
-    p1 = thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b 
-    p2 = tf.transpose(p1)
-    K_weighted_naive = p1 * p2 * K_orig
-    K = K_weighted_naive
-    K_xx = K[:data_num, :data_num]
-    K_yy = K[data_num:, data_num:]
-    K_xy = K[:data_num, data_num:]
-    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
-    num_combos = data_num * (data_num - 1) / 2
-    mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
-           tf.reduce_sum(K_yy_upper) / num_combos -
-           2 * tf.reduce_sum(K_xy) / (data_num * data_num))
-elif weighting == 'inverse':
-    # Define kernel with inverse weights, over only data terms of kernel. 
-    p1_inverse = 1. / (thin_a / (1 + tf.exp(10 * (v_tiled_horiz -1))) + thin_b)
-    p2_inverse = tf.transpose(p1_inverse)
-    Kw_xy = (K_orig[:data_num, data_num:] * p1_inverse[:data_num, data_num:])
-    Kw_xy_upper = tf.matrix_band_part(Kw_xy, 0, -1) - tf.matrix_band_part(Kw_xy, 0, 0) 
-    K_yy = K_orig[data_num:, data_num:]
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
-    num_combos = data_num * (data_num - 1) / 2
-    mmd = (tf.reduce_sum(K_yy_upper) / num_combos -
-           2 * tf.reduce_sum(Kw_xy) / (data_num * data_num))
+# Define kernel with naive weights from thinning function, over entire kernel. 
+p1 = thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b 
+p2 = tf.transpose(p1)
+K_weighted_naive = p1 * p2 * K_orig
+Kwn_xx = K_weighted_naive[:data_num, :data_num]
+Kwn_yy = K_weighted_naive[data_num:, data_num:]
+Kwn_xy = K_weighted_naive[:data_num, data_num:]
+Kwn_xx_upper = tf.matrix_band_part(Kwn_xx, 0, -1) - tf.matrix_band_part(Kwn_xx, 0, 0)
+Kwn_yy_upper = tf.matrix_band_part(Kwn_yy, 0, -1) - tf.matrix_band_part(Kwn_yy, 0, 0)
+num_combos = data_num * (data_num - 1) / 2
+mmd_wn = (tf.reduce_sum(Kwn_xx_upper) / num_combos +
+          tf.reduce_sum(Kwn_yy_upper) / num_combos -
+          2 * tf.reduce_sum(Kwn_xy) / (data_num * data_num))
+# Define kernel with inverse weights only for data terms (i.e. with x).
+p1_vert_unnormed = 1. / (thin_a / (1 + tf.exp(10 * (v -1))) + thin_b)
+p1_vert_unnormed_sum = tf.reduce_sum(p1_vert_unnormed)
+p1_vert = p1_vert_unnormed / p1_vert_unnormed_sum
+p1_inverse = tf.tile(p1_vert, [1, x_len + z_len])
+p2_inverse = tf.transpose(p1_inverse)
+Kw_xx = (K_orig[:data_num, :data_num] *
+         p1_inverse[:data_num, :data_num] *
+         p2_inverse[:data_num, :data_num])
+Kw_xy = (K_orig[:data_num, data_num:] *
+         p1_inverse[:data_num, data_num:])
+Kw_yy = K_orig[data_num:, data_num:]
+Kw_xx_upper = (tf.matrix_band_part(Kw_xx, 0, -1) -
+               tf.matrix_band_part(Kw_xx, 0, 0))
+Kw_xy_upper = (tf.matrix_band_part(Kw_xy, 0, -1) -
+               tf.matrix_band_part(Kw_xy, 0, 0))
+Kw_yy_upper = (tf.matrix_band_part(Kw_yy, 0, -1) -
+               tf.matrix_band_part(Kw_yy, 0, 0))
+num_combos = data_num * (data_num - 1) / 2
+mmd_w = (tf.reduce_sum(Kw_xx_upper) / num_combos + 
+         tf.reduce_sum(Kw_yy_upper) / num_combos -
+         2 * tf.reduce_sum(Kw_xy) / (data_num * data_num))
+# Define kernel with no weights.
+K_xx = K_orig[:data_num, :data_num]
+K_yy = K_orig[data_num:, data_num:]
+K_xy = K_orig[:data_num, data_num:]
+K_xx_upper = tf.matrix_band_part(K_xx, 0, -1) - tf.matrix_band_part(K_xx, 0, 0)
+K_yy_upper = tf.matrix_band_part(K_yy, 0, -1) - tf.matrix_band_part(K_yy, 0, 0)
+num_combos = data_num * (data_num - 1) / 2
+mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
+       tf.reduce_sum(K_yy_upper) / num_combos -
+       2 * tf.reduce_sum(K_xy) / (data_num * data_num))
 
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
@@ -256,17 +279,34 @@ else:
     opt = tf.train.GradientDescentOptimizer(learning_rate)
 
 # Set up objective function, and apply gradient clipping.
-OPTION = 1
-if OPTION == 1:
+if gradient_clipping == 'none':
     g_optim = opt.minimize(mmd, var_list=g_vars)
-elif OPTION == 2:
+    g_optim_wn = opt.minimize(mmd_wn, var_list=g_vars)
+    g_optim_w = opt.minimize(mmd_w, var_list=g_vars)
+elif gradient_clipping == 'opt1':
     gradients, variables = zip(*opt.compute_gradients(mmd))
     gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
     g_optim = opt.apply_gradients(zip(gradients, variables))
-elif OPTION == 3:
+
+    gradients_wn, variables_wn = zip(*opt.compute_gradients(mmd_wn))
+    gradients_wn, _ = tf.clip_by_global_norm(gradients_wn, 1.0)
+    g_optim_wn = opt.apply_gradients(zip(gradients_wn, variables_wn))
+
+    gradients_w, variables_w = zip(*opt.compute_gradients(mmd_w))
+    gradients_w, _ = tf.clip_by_global_norm(gradients_w, 1.0)
+    g_optim_w = opt.apply_gradients(zip(gradients_w, variables_w))
+elif gradient_clipping == 'opt2':
     gvs = opt.compute_gradients(mmd)
     capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
     g_optim = optimizer.apply_gradients(capped_gvs)
+
+    gvs_wn = opt.compute_gradients(mmd_wn)
+    capped_gvs_wn = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs_wn]
+    g_optim_wn = optimizer.apply_gradients(capped_gvs_wn)
+
+    gvs_w = opt.compute_gradients(mmd_w)
+    capped_gvs_w = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs_w]
+    g_optim_w = optimizer.apply_gradients(capped_gvs_w)
 
 # Initialize session, graph, and checkpoint dir.
 init_op = tf.global_variables_initializer()
@@ -280,61 +320,30 @@ start_time = time()
 # Train.
 print '\nCONFIG'
 print args
-thin_condition = lambda x: (x % 10 == 0 or x % 11 == 0)
 for it in range(total_num_runs):
-    '''
-    if thin:
-        if thin_condition(it):
-            # Sample from a thinned generator until size matches data.
-            # - fetch a batch of candidates
-            # - apply thinning
-            # - if needed, fetch another batch of candidates, adding until there 
-            #     are data_num total
-            g_thinned = np.array([])
-            while len(g_thinned) < data_num:
-                g_candidates = sess.run(g, feed_dict={z: get_random_z(data_num, z_dim)})
-                for candidate in g_candidates:
-                    is_included = np.random.binomial(1, prob_of_keeping(candidate[0]))
-                    if is_included:
-                        g_thinned = np.concatenate((g_thinned, candidate))
-                        if len(g_thinned) == data_num:
-                            break
-            g_thinned = g_thinned.reshape(-1, 1)
-
-            # Update generator to reduce MMD between thinned generator and data sets.
-            sess.run(g_optim,
-                     feed_dict={
-                         z: get_random_z(data_num, z_dim),
-                         x: np.reshape(data, [-1, 1]),
-                         g: g_thinned})
-
-        else:
-            sess.run(g_optim,
-                     feed_dict={
-                         z: get_random_z(data_num, z_dim),
-                         #x: np.random.choice(data, (data_num, 1))
-                         x: np.reshape(data, [-1, 1])})
-    else:
+    if it <= 10000:
         sess.run(g_optim,
                  feed_dict={
                      z: get_random_z(data_num, z_dim),
                      #x: np.random.choice(data, (data_num, 1))
                      x: np.reshape(data, [-1, 1])})
-    '''
+        if it == 10000:
+            os.system('python eval_samples_thin.py --expt="{}"'.format(expt))
+    else:
+        sess.run(g_optim_w,
+                 feed_dict={
+                     z: get_random_z(data_num, z_dim),
+                     #x: np.random.choice(data, (data_num, 1))
+                     x: np.reshape(data, [-1, 1])})
 
-    sess.run(g_optim,
-             feed_dict={
-                 z: get_random_z(data_num, z_dim),
-                 #x: np.random.choice(data, (data_num, 1))
-                 x: np.reshape(data, [-1, 1])})
 
-    '''
-    vv, ss, pp1, pp2, ko, kw = sess.run([v_tiled_horiz, sqs, p1, p2, K_orig, K_weighted],
-             feed_dict={
-                 z: get_random_z(data_num, z_dim),
-                 #x: np.random.choice(data, (data_num, 1))
-                 x: np.reshape(data, [-1, 1])})
-    '''
+    if 0:
+        p1vu, p1vus, p1v, p1i = sess.run([p1_vert_unnormed, p1_vert_unnormed_sum, p1_vert, p1_inverse],
+                 feed_dict={
+                     z: get_random_z(data_num, z_dim),
+                     #x: np.random.choice(data, (data_num, 1))
+                     x: np.reshape(data, [-1, 1])})
+        pdb.set_trace()
 
     # Occasionally save and plot.
     if it % save_iter == 0:
@@ -344,28 +353,18 @@ for it in range(total_num_runs):
             [mmd, g], feed_dict={
                 z: z_sample,
                 x: x_sample})
-        #if thin and thin_condition(it):
-        #    mmd_xgt_out = sess.run(
-        #        mmd, feed_dict={
-        #            z: z_sample,
-        #            x: x_sample,
-        #            g: g_thinned})
-        #else:
-        #    mmd_xgt_out = 99999  # Placeholder.
-        mmd_xgt_out = 99999  # Placeholder.
 
         np.save(os.path.join(logs_dir, 'sample_z.npy'), z_sample)
         np.save(os.path.join(logs_dir, 'sample_x.npy'), x_sample)
         np.save(os.path.join(logs_dir, 'sample_g.npy'), g_out)
         with open(os.path.join(logs_dir, 'sample__log.txt'), 'w') as log_file:
-                log_file.write(str(args))
+            log_file.write(str(args))
 
         # Save checkpoint.
         saver.save(sess, os.path.join(checkpoints_dir, 'test'), global_step=it)
 
         # Print helpful summary.
-        print '\niter:{} mmd_xg_out = {:.5f} mmd_xgt_out = {:.5f}'.format(
-                it, mmd_xg_out, mmd_xgt_out)
+        print '\niter:{} mmd_xg_out = {:.5f}'.format(it, mmd_xg_out)
         print ' min:{} max= {}'.format(min(g_out), max(g_out))
         print ' [*] Saved sample logs to {}'.format(logs_dir)
         print ' [*] Saved checkpoint {} to {}'.format(it, checkpoints_dir)
@@ -382,4 +381,4 @@ for it in range(total_num_runs):
                    ' Total est.: {}').format(elapsed_time, time_per_iter,
                                              total_est_str)
 
-os.system('python eval_samples_thin.py --expt="thin"')
+os.system('python eval_samples_thin.py --expt="{}"'.format(expt))
