@@ -205,9 +205,6 @@ Kw_xy = K[:data_num, data_num:] * p1_inv_xy_normed
 mmd = (tf.reduce_sum(K_yy_upper) / num_combos_yy -
        2 * tf.reduce_sum(Kw_xy))
 
-#mmd = (tf.reduce_sum(K_yy_upper) / num_combos_yy -
-#       2 * tf.reduce_sum(K_xy) / (data_num * gen_num))
-
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
     opt = tf.train.AdagradOptimizer(learning_rate)
@@ -229,7 +226,6 @@ else:
     gvs = opt(learning_rate).compute_gradients(mmd)
     capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gvs]
     g_optim = optimizer.apply_gradients(capped_gvs)
-
 
 
 # BEGIN train.
