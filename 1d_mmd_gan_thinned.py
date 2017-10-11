@@ -30,6 +30,8 @@ parser.add_argument('--optimizer', type=str, default='adam',
 parser.add_argument('--total_num_runs', type=int, default=10101)
 parser.add_argument('--save_iter', type=int, default=1500)
 parser.add_argument('--expt', type=str, default='test')
+parser.add_argument('--weighting', type=str, default='logistic',
+                    choices=['logistic', 'kernel'])
 
 args = parser.parse_args()
 data_num = args.data_num
@@ -45,11 +47,12 @@ optimizer = args.optimizer
 total_num_runs = args.total_num_runs
 save_iter = args.save_iter
 expt = args.expt
+weighting = args.weighting
 out_dim = 1
 activation = tf.nn.elu
-save_tag = 'expt{}_dn{}_gn{}_zd{}_w{}_d{}_lr{}_op_{}_sig{}_thin{}'.format(
+save_tag = 'expt{}_dn{}_gn{}_zd{}_w{}_d{}_lr{}_op_{}_sig{}_thin{}_wt{}'.format(
     expt, data_num, gen_num, z_dim, width, depth, learning_rate, optimizer,
-    sigma, str(thin_a)+str(thin_b))
+    sigma, str(thin_a)+str(thin_b), weighting)
 
 
 def prepare_dirs_and_logging(expt):
@@ -106,40 +109,53 @@ def load_checkpoints(sess, saver, checkpoints_dir):
 
 
 def thin_data(data_unthinned):
-    """Thins data, accepting ~90% of Cluster 1, and ~10% Cluster 2.
+    '''Thins data, accepting ~90% of Cluster 1, and ~10% Cluster 2.
     Args:
       data_unthinned: List of scalar values.
     Returns:
       thinned: Numpy array of values, thinned according to logistic function.
-    """ 
+    ''' 
 
     thinned = [candidate for candidate in data_unthinned if 
-               np.random.binomial(1, prob_of_keeping(candidate))]
+               np.random.binomial(1, prob_of_keeping(candidate, is_tf=False,
+                                                     weighting=weighting))]
     return thinned 
 
 
-def prob_of_keeping(x):
-    """Logistic mapping to preferentially thin samples.
+def prob_of_keeping(x, is_tf=False, weighting='logistic'):
+    '''Logistic mapping to preferentially thin samples.
     
-    Maps [-Inf, Inf] to [0.9, 0.1], centered at 2.
+    Maps [-Inf, Inf] to [0, 1], centered at 2.
+
     Args:
       x: Scalar, point from original distribution.
+      is_tf: Boolean flag for whether computation is on Tensors or Numpy input.
+      weighting: String, type of thinning function.
     Returns:
       p: Probability of being thinned.
-    """
-    p = 0.5 / (1 + np.exp(10 * (x - 1))) + 0.5
+    '''
+    if weighting == 'logistic':
+        if is_tf:
+            p = thin_a / (1 + tf.exp(10 * (x - 1))) + thin_b
+        else:
+            p = thin_a / (1 + np.exp(10 * (x - 1))) + thin_b
+    elif weighting == 'kernel':
+        if is_tf:
+            p = 1. - thin_a * tf.exp(-10. * tf.square(x - 2))
+        else:
+            p = 1. - thin_a * np.exp(-10. * np.square(x - 2))
     return p
 
 
 def generate_data(n):
-    """Generates true data, and applies thinning function.
+    '''Generates true data, and applies thinning function.
     
     Args:
       n: Number of data candidates to start with, to then be thinned.
     Returns:
       data_unthinned: Unthinned numpy array of points.
       data: Thinned numpy array of points.
-    """
+    '''
     n_c2 = n/2
     n_c1 = n - n_c2
     data_unthinned = np.concatenate((np.random.normal(0, 0.5, n_c1),
@@ -150,7 +166,7 @@ def generate_data(n):
 
 
 def get_random_z(gen_num, z_dim):
-    """Generates 2d array of noise input data."""
+    '''Generates 2d array of noise input data.'''
     #return np.random.uniform(size=[gen_num, z_dim],
     #                         low=-1.0, high=1.0)
     #return np.random.gamma(5, size=[gen_num, z_dim])
@@ -161,7 +177,7 @@ def get_random_z(gen_num, z_dim):
 # Set up generator.
 def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
               reuse=False):
-    """Generates output, given noise input."""
+    '''Generates output, given noise input.'''
     with tf.variable_scope('generator', reuse=reuse) as gen_vars:
         x = layers.dense(z, width, activation=activation)
 
@@ -195,13 +211,12 @@ K_xy = K[:data_num, data_num:]
 K_yy_upper = (tf.matrix_band_part(K_yy, 0, -1) - 
               tf.matrix_band_part(K_yy, 0, 0))
 num_combos_yy = gen_num * (gen_num - 1) / 2
-
 v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
-p1_inv = 1. / (thin_a / (1 + tf.exp(10 * (v_tiled_horiz - 1))) + thin_b)
-p2_inv = tf.transpose(p1_inv)
-p1_inv_xy = p1_inv[:data_num, data_num:]
-p1_inv_xy_normed = p1_inv_xy / tf.reduce_sum(p1_inv_xy)
-Kw_xy = K[:data_num, data_num:] * p1_inv_xy_normed
+thinning_fn = prob_of_keeping(v_tiled_horiz, is_tf=True, weighting=weighting)
+p1_weights = 1. / thinning_fn 
+p1_weights_xy = p1_weights[:data_num, data_num:]
+p1_weights_xy_normed = p1_weights_xy / tf.reduce_sum(p1_weights_xy)
+Kw_xy = K[:data_num, data_num:] * p1_weights_xy_normed
 mmd = (tf.reduce_sum(K_yy_upper) / num_combos_yy -
        2 * tf.reduce_sum(Kw_xy))
 
