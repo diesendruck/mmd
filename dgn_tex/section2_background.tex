@@ -1,0 +1,31 @@
+\section{Background}
+
+\subsection{Generative Adversarial Networks}
+Generative Adversarial Networks (GANs) are a class of models which take a collection of data as input, and return a function that arbitrarily simulates new instances from the underlying data distribution. These models do not use or require an explicit probability distribution for the data, but instead use a neural network to score the similarity of simulations and the data.
+
+The basic procedure is a two-player game, where both players start as novices, and improve in their respective task over the course of the game. One player (``generator'') learns to  generate simulations, while the other (``discriminator'') learns to discriminate between simulations and data. With this dynamic, the generator should produce more and more credible simulations, while the discriminator should detect more and more subtle differences between simulations and data. Given a diverse set of data, a generator would ideally produce a similarly diverse set of credible simulations, but this is not always true --- one failure mode, for example, is to only generate close to the target mode. This problem is often called ``mode collapse''.
+
+\subsection{Mode collapse}
+This paper's focus on bias correction is the direct result of solving the mode collapse problem of earlier GAN models. In general, the generator is tasked with simulating points which could have realistically been drawn from the true, underlying distribution. As originally conceived, the GAN is tasked with sampling points which would be classified as true. As such, a generator can theoretically and practically satisfy this model by reproducing a single, realistic sample. Several improvements to GAN models avoid this outcome and increase the diversity of simulations, by proposing objective functions which match across all modes. One successful modification is the MMD-GAN, which proposes a distance measure that is zero if and only if distributions match exactly. The successful application of this model shows that GAN samples can accurately reflect the data distribution.
+
+\subsection{MMD-GAN}
+In contrast to the original GAN formulation, which uses a classifier in its objective function, improved versions of GANs use other means to bring simulation and data distributions together. Boundary Equilibrium GAN (BEGAN) is one example, which seeks to match the distributions of autoencoder errors over simulations and data. This structure is expanded in MMD-GAN, where the objective function also includes the MMD between encodings of simulations and data. The MMD has featured prominently in recent two-sample literature, where the goal is to determine whether two samples come from the same population or not. Here, it provides the mechanism for the generator to match smaller modes of the data distribution, by ensuring that the two samples (simulations, data) look as if they are from the same population.
+
+The MMD works by projecting data into a Reproducing Kernel Hilbert Space (RKHS), defined by a characteristic kernel, typically the Radial Basis Function (RBF), $k(x, x')$. These embeddings imply a \textit{kernel mean embedding}, $\mu$, which describes the mean of a sample, as a function of the chosen kernel:
+\begin{align}
+k(x, x') &= \exp (-c||x - x'||^2) \label{rbf}\\
+\mu_\mathbb{P} &= \int k(x,\cdot) d\mathbb{P}(x).
+\end{align} 
+The square of the MMD between these mean embeddings is characterized as follows:
+\begin{align}
+M_k(\mathbb{P}, \mathbb{Q}) = ||\mu_{\mathbb{P}} - \mu_{\mathbb{Q}}||^2_\mathcal{H} = \mathbb{E}_\mathbb{P}[k(x,x')] - 2 \mathbb{E}_{\mathbb{P}, \mathbb{Q}}[k(x,y)] + \mathbb{E}_{\mathbb{Q}}[k(y,y')],
+\end{align}
+where $k$ is the RBF kernel; $\mathbb{P}$ and $\mathbb{Q}$ are the data and simulation distributions, respectively; $\mu$ is the kernel mean embedding for a particular distribution; $||\cdot||_{\mathcal{H}}$ represents a norm on the Hilbert space induced by kernel $k$; $x, x'$ represent different samples from distribution $\mathbb{P}$, and $y, y'$ represent different samples from distribution $\mathbb{Q}$.
+
+The GAN objective therefore becomes
+\begin{align}
+\min_{\theta} \max_{\phi} M (f(x), f(g_\theta(\mathcal{Z}))) - \lambda \mathbb{E}_{i \in \mathcal{X} \cup g(\mathcal{Z})} ||i - f_{dec}(f_\phi(i))||^2, 
+\end{align}
+where $\theta$ are the parameters of the generative function; $\phi$ are the parameters of the autoencoder; $g_\theta$ is the generative function; $f$ is the autoencoder, with encoder $f_\phi$ and decoder $f_{dec}$; $\mathcal{X} \in \mathbb{R}^n$ is the space of images, and $\mathcal{Z} \in \mathbb{R}^d: d << n$ is the space of random noise input. During training, the generative function and autoencoder are updated in an alternating manner. Updates to the generative function $g_\theta$ seek to minimize MMD between encodings of data and encodings of simulations. Updates to the autoencoder seek to increase the MMD, and to decrease autoencoder loss over both sample sets.
+
+While this construction does produce realistic results that accurately reflect the data distribution, it also \textit{recreates the biases therein}. Rather than rely on algorithmic choices or data subsetting heuristics, an ideal method for correcting bias would incorporate the bias information directly into the distance measure. The weighted MMD proposed here uses this strategy.

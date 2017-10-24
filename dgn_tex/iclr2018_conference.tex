@@ -1,0 +1,267 @@
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2018_conference,times}
+\usepackage{hyperref}
+\usepackage{url}
+
+
+\title{Directing Generative Networks with Weighted Maximum Mean Discrepancy}
+
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the \iclrfinalcopy macro remains commented out below.
+% Non-anonymous submissions will be rejected without review.
+
+\author{Maurice Diesendruck, Guy W.~Cole \& Sinead Williamson \\
+Department of Statistics and Data Sciences\\
+University of Texas at Austin\\
+Austin, TX 78751, USA \\
+\texttt{\{momod,guywcole,sineadwilliamson\}@utexas.edu}}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to \LaTeX{} to determine where to break
+% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
+% puts 3 of 4 authors names on the first line, and the last on the second
+% line, try using \AND instead of \And before the third author name.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\usepackage{amsmath,amssymb,latexsym, amsfonts, amscd, amsthm, xy}
+\usepackage{graphicx,epsfig}
+\usepackage{multirow}
+\usepackage[ruled]{algorithm2e}
+\usepackage{bbm}
+\usepackage{siunitx}
+\usepackage{url}
+\usepackage{booktabs}
+\def\P{\mathbb{P}}
+\def\Q{\mathbb{Q}}
+\def\R{\mathbb{R}}
+\def\E{\mathbb{E}}
+\def\cA{\mathcal{A}}
+\def\cD{\mathcal{D}}
+\def\cF{\mathcal{F}}
+\def\cG{\mathcal{G}}
+\def\cH{\mathcal{H}}
+\def\cI{\mathcal{I}}
+\def\cL{\mathcal{L}}
+\def\cM{\mathcal{M}}
+\def\cO{\mathcal{O}}
+\def\cT{\mathcal{T}}
+\def\cU{\mathcal{U}}
+\def\cV{\mathcal{V}}
+\def\cW{\mathcal{W}}
+\def\cX{\mathcal{X}}
+\def\cZ{\mathcal{Z}}
+
+%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+Generative adversarial networks (GANs) can be trained to model complex image distributions where it is inconvenient or intractable to assign a probabilistic structure to the likelihood function. Earlier models achieved realistic samples, but suffered from mode collapse --- when samples do not cover the full domain of the distribution. More recent models have resolved issues of mode collapse by using alternative \textit{adversaries} in their objective functions, which ensure that each mode in the data distribution is covered by the generated samples. With proper coverage, however, a new challenge emerges: Given that data is biased in a known way, adjust the model to compensate for this bias. Here, we introduce a simple structure within a maximum mean discrepancy (MMD) objective function, which provides a flexible way of re-balancing generated data and directing the generative function toward a target group. The weighted MMD interprets the bias as a thinning function on the empirical data measure, and yields a manipulable discrepancy measure that can sway generative samples toward a chosen set of labeled points. \end{abstract}
+
+\section{Introduction}
+
+GANs have become a popular method of simulating data from complex datasets, as an alternative to previous likelihood-based approaches. In classical and Bayesian modeling, generative models require a known probabilistic structure, where the functional form of the likelihood is known beforehand. The Gaussian mixture model is one case, where the number of Gaussian components and their parameters can be learned, but where data is always evaluated against a Gaussian likelihood. Such methods can be difficult to justify and intractable to compute in very high-dimensional space, where data points exist on a sparse sub-manifold of the data space. For the remainder of this paper, we refer to samples from the generative function/model as \textit{simulations}, and we refer to samples from the true data distribution as \textit{data}.
+
+To address the challenges of likelihood intractability, a class of models called \textit{likelihood-free} models emerged, where GANs can be considered a new member. Approximate Bayesian Computation (ABC) is one such model, where simulations are generated from a function with randomly initialized parameters, then compared to data using a distance measure chosen by a practitioner. When the distance between simulations and data is below a threshold, that parameter set is stored, and the random parameter initialization begins again.
+
+More recently, GANs have accomplished as similar kind of sampling, where a neural network classifier serves as a proxy distance function. By some interpretations, the classifier acts as a likelihood ratio estimator between simulations and data. Several results show smooth transitions between simulations in complex image spaces, illustrating realistic paths through sparse subspaces of the data.
+
+Smooth interpolations of high-dimensional data may be useful for a variety of creative applications, such as design and animation, where a general latent structure is learned from data, and then explored using such a model. In the exploratory stage, new simulations may emerge, whose fundamental latent features match the data, but whose details have never been seen before. Consider the following two examples: 
+\begin{itemize}
+\item Learning the latent structure of a chair, using a large collection of images of chairs. Shared features include vertical legs, a flat base, and a vertical back. A generative model may train on these images, then simulate an image with a configuration of legs, base, and back that is entirely novel.\\
+\item Learning to simulate faces for an avatar in virtual reality scene. Faces are learned from a large collection of human faces, and randomly simulated for each new session.
+\end{itemize}
+With the current modeling toolset, a generative function will simulate approximately the same distribution as the data. Consider, though, that a model user, designer, or practitioner may be interested in generating a distribution that (a) contains all modes, and (b) favors a particular class in a way that is different from the data. Supposing for the above two examples that the data under-represents rocking chairs and female faces. A user may want to generate all kinds of chairs, but twice as many rocking chairs as folding chairs. A game designer may want to boost the proportion of female faces by 30\%. The weighted MMD provides a way to incorporate these behaviors directly into the adversarial distance measure. 
+
+The remainder of this paper is organized as follows: Section 2 introduces the GAN framework, mode collapse, and MMD-GAN. Section 3 describes our weighted MMD approach for bias correction. Section 4 demonstrates the use of the weighted MMD on one-dimensional toy data and MNIST data. Section 5 concludes with discussion and ideas for future work. 
+
+\section{Background}
+
+\subsection{Generative Adversarial Networks}
+Generative Adversarial Networks (GANs) are a class of models which take a collection of data as input, and return a function that arbitrarily simulates new instances from the underlying data distribution. These models do not use or require an explicit probability distribution for the data, but instead use a neural network to score the similarity of simulations and the data.
+
+The basic procedure is a two-player game, where both players start as novices, and improve in their respective task over the course of the game. One player (``generator'') learns to  generate simulations, while the other (``discriminator'') learns to discriminate between simulations and data. With this dynamic, the generator should produce more and more credible simulations, while the discriminator should detect more and more subtle differences between simulations and data. Given a diverse set of data, a generator would ideally produce a similarly diverse set of credible simulations, but this is not always true --- one failure mode, for example, is to only generate close to the target mode. This problem is often called ``mode collapse''.
+
+\subsection{Mode collapse}
+This paper's focus on bias correction is the direct result of solving the mode collapse problem of earlier GAN models. In general, the generator is tasked with simulating points which could have realistically been drawn from the true, underlying distribution. As originally conceived, the GAN is tasked with sampling points which would be classified as true. As such, a generator can theoretically and practically satisfy this model by reproducing a single, realistic sample. Several improvements to GAN models avoid this outcome and increase the diversity of simulations, by proposing objective functions which match across all modes. One successful modification is the MMD-GAN, which proposes a distance measure that is zero if and only if distributions match exactly. The successful application of this model shows that GAN samples can accurately reflect the data distribution.
+
+\subsection{MMD-GAN}
+In contrast to the original GAN formulation, which uses a classifier in its objective function, improved versions of GANs use other means to bring simulation and data distributions together. Boundary Equilibrium GAN (BEGAN) is one example, which seeks to match the distributions of autoencoder errors over simulations and data. This structure is expanded in MMD-GAN, where the objective function also includes the MMD between encodings of simulations and data. The MMD has featured prominently in recent two-sample literature, where the goal is to determine whether two samples come from the same population or not. Here, it provides the mechanism for the generator to match smaller modes of the data distribution, by ensuring that the two samples (simulations, data) look as if they are from the same population.
+
+The MMD works by projecting data into a Reproducing Kernel Hilbert Space (RKHS), defined by a characteristic kernel, typically the Radial Basis Function (RBF), $k(x, x')$. These embeddings imply a \textit{kernel mean embedding}, $\mu$, which describes the mean of a sample, as a function of the chosen kernel:
+\begin{align}
+k(x, x') &= \exp (-c||x - x'||^2) \label{rbf}\\
+\mu_\mathbb{P} &= \int k(x,\cdot) d\mathbb{P}(x).
+\end{align} 
+The square of the MMD between these mean embeddings is characterized as follows:
+\begin{align}
+M_k(\mathbb{P}, \mathbb{Q}) = ||\mu_{\mathbb{P}} - \mu_{\mathbb{Q}}||^2_\mathcal{H} = \mathbb{E}_\mathbb{P}[k(x,x')] - 2 \mathbb{E}_{\mathbb{P}, \mathbb{Q}}[k(x,y)] + \mathbb{E}_{\mathbb{Q}}[k(y,y')],
+\end{align}
+where $k$ is the RBF kernel; $\mathbb{P}$ and $\mathbb{Q}$ are the data and simulation distributions, respectively; $\mu$ is the kernel mean embedding for a particular distribution; $||\cdot||_{\mathcal{H}}$ represents a norm on the Hilbert space induced by kernel $k$; $x, x'$ represent different samples from distribution $\mathbb{P}$, and $y, y'$ represent different samples from distribution $\mathbb{Q}$.
+
+The GAN objective therefore becomes
+\begin{align}
+\min_{\theta} \max_{\phi} M (f(x), f(g_\theta(\mathcal{Z}))) - \lambda \mathbb{E}_{i \in \mathcal{X} \cup g(\mathcal{Z})} ||i - f_{dec}(f_\phi(i))||^2, 
+\end{align}
+where $\theta$ are the parameters of the generative function; $\phi$ are the parameters of the autoencoder; $g_\theta$ is the generative function; $f$ is the autoencoder, with encoder $f_\phi$ and decoder $f_{dec}$; $\mathcal{X} \in \mathbb{R}^n$ is the space of images, and $\mathcal{Z} \in \mathbb{R}^d: d << n$ is the space of random noise input. During training, the generative function and autoencoder are updated in an alternating manner. Updates to the generative function $g_\theta$ seek to minimize MMD between encodings of data and encodings of simulations. Updates to the autoencoder seek to increase the MMD, and to decrease autoencoder loss over both sample sets.
+
+While this construction does produce realistic results that accurately reflect the data distribution, it also \textit{recreates the biases therein}. Rather than rely on algorithmic choices or data sub-setting heuristics, an ideal method for correcting bias would incorporate the bias information directly into the distance measure. The weighted MMD proposed here uses this strategy.
+
+\section{Weighted MMD}
+
+The weighted MMD interprets the observed data distribution as a thinned version of the desired, unbiased distribution. For a desired, unbiased probability distribution $\mathbb{P}(x)$, we observe \textit{only} the modified distribution $T(x)\mathbb{P}(x)$, where $T(x): x \rightarrow t \in [0, 1]$ is a thinning function which discounts density for some region(s) of the input space $\mathcal{X}$. The original kernel mean embedding is then re-written as an expectation over a modified measure $T(x)\mathbb{P}(x)$, where:
+\begin{align}
+\mu_{T \cdot \mathbb{P}} = \int k(x,\cdot)dT(x)\mathbb{P}(x) = \int \frac{k(x,\cdot)}{T(x)}d\mathbb{P}(x).
+\end{align}
+A known under-representation of a particular region in the data can be expressed using a thinning function $T(x)$ centered around that region, indicating more of a discount ($t$ closer to zero) in that area, and less of a discount ($t$ close to one) elsewhere. Since our choice of $T(x)$ will not necessarily produce a valid probability measure $T(x)\mathbb{P}(x)$, we apply weights $1/T(x)$ as if from a self-normalizing importance sampler. The resulting MMD takes the following form:
+\begin{align}
+M_k(\mathbb{P}, \mathbb{Q}) &= ||\mu_{T \cdot \mathbb{P}} - \mu_{\mathbb{Q}}||^2_\mathcal{H} \\
+&= \mathbb{E}_{T \cdot \mathbb{P}}\Big[\frac{1}{T(x)} k(x,x') \frac{1}{T(x')}\Big] - 2 \mathbb{E}_{T\cdot\mathbb{P}, \mathbb{Q}}\Big[\frac{1}{T(x)}k(x,y)\Big] + \mathbb{E}_{\mathbb{Q}}[k(y,y')].
+\end{align}
+\subsection{Defining the thinning function}
+In order to center the thinning function around a target region, the practitioner selects a small sample of points $X^*$ which represent the region they would like to boost. A new kernel $k_{target}(\cdot)$ can be defined using the sample mean and sample covariance of the selected points, giving higher values for inputs near $X^*$, and lower values otherwise. By scaling kernel values $k_{target}(\cdot)$ to fall within $[0, k_{max}]: k_{max} \in [0,1)$, the thinning function can be defined as $T(x) = 1 - k_{target} : T(x) \in [1-k_{max}, 1]$. Taking $k_{max}=0.75$, for example, means that $k_{target}$ will reach its maximum of 0.75 near the target region. Similarly, thinning values will reach their lowest values of 0.25 near the target region. A thinning value of 0.25 near the target region implies that the desired, unbiased distribution $\mathbb{P}$ (as opposed to the observed $T(x)\mathbb{P}(x)$) is four times as dense in that region.
+
+By taking kernel expectations with the weights described above, a practitioner can direct and control the density of the generative function, boosting target regions with minimal labeling, and scaling the effect to the desired level.
+
+\section{Results}
+
+
+
+
+\pagebreak
+\section{Citations, figures, tables, references}
+\label{others}
+
+These instructions apply to everyone, regardless of the formatter being used.
+
+\subsection{Citations within the text}
+
+Citations within the text should be based on the \texttt{natbib} package
+and include the authors' last names and year (with the ``et~al.'' construct
+for more than two authors). When the authors or the publication are
+included in the sentence, the citation should not be in parenthesis (as
+in ``See \citet{Hinton06} for more information.''). Otherwise, the citation
+should be in parenthesis (as in ``Deep learning shows promise to make progress towards AI~\citep{Bengio+chapter2007}.'').
+
+The corresponding references are to be listed in alphabetical order of
+authors, in the \textsc{References} section. As to the format of the
+references themselves, any style is acceptable as long as it is used
+consistently.
+
+\subsection{Footnotes}
+
+Indicate footnotes with a number\footnote{Sample of the first footnote} in the
+text. Place the footnotes at the bottom of the page on which they appear.
+Precede the footnote with a horizontal rule of 2~inches
+(12~picas).\footnote{Sample of the second footnote}
+
+\subsection{Figures}
+
+All artwork must be neat, clean, and legible. Lines should be dark
+enough for purposes of reproduction; art work should not be
+hand-drawn. The figure number and caption always appear after the
+figure. Place one line space before the figure caption, and one line
+space after the figure. The figure caption is lower case (except for
+first word and proper nouns); figures are numbered consecutively.
+
+Make sure the figure caption does not get separated from the figure.
+Leave sufficient space to avoid splitting the figure and figure caption.
+
+You may use color figures.
+However, it is best for the
+figure captions and the paper body to make sense if the paper is printed
+either in black/white or in color.
+\begin{figure}[h]
+\begin{center}
+%\framebox[4.0in]{$\;$}
+\fbox{\rule[-.5cm]{0cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
+\end{center}
+\caption{Sample figure caption.}
+\end{figure}
+
+\subsection{Tables}
+
+All tables must be centered, neat, clean and legible. Do not use hand-drawn
+tables. The table number and title always appear before the table. See
+Table~\ref{sample-table}.
+
+Place one line space before the table title, one line space after the table
+title, and one line space after the table. The table title must be lower case
+(except for first word and proper nouns); tables are numbered consecutively.
+
+\begin{table}[t]
+\caption{Sample table title}
+\label{sample-table}
+\begin{center}
+\begin{tabular}{ll}
+\multicolumn{1}{c}{\bf PART}  &\multicolumn{1}{c}{\bf DESCRIPTION}
+\\ \hline \\
+Dendrite         &Input terminal \\
+Axon             &Output terminal \\
+Soma             &Cell body (contains cell nucleus) \\
+\end{tabular}
+\end{center}
+\end{table}
+
+\section{Final instructions}
+Do not change any aspects of the formatting parameters in the style files.
+In particular, do not modify the width or length of the rectangle the text
+should fit into, and do not change font sizes (except perhaps in the
+\textsc{References} section; see below). Please note that pages should be
+numbered.
+
+\section{Preparing PostScript or PDF files}
+
+Please prepare PostScript or PDF files with paper size ``US Letter'', and
+not, for example, ``A4''. The -t
+letter option on dvips will produce US Letter files.
+
+Consider directly generating PDF files using \verb+pdflatex+
+(especially if you are a MiKTeX user).
+PDF figures must be substituted for EPS figures, however.
+
+Otherwise, please generate your PostScript and PDF files with the following commands:
+\begin{verbatim}
+dvips mypaper.dvi -t letter -Ppdf -G0 -o mypaper.ps
+ps2pdf mypaper.ps mypaper.pdf
+\end{verbatim}
+
+\subsection{Margins in LaTeX}
+
+Most of the margin problems come from figures positioned by hand using
+\verb+\special+ or other commands. We suggest using the command
+\verb+\includegraphics+
+from the graphicx package. Always specify the figure width as a multiple of
+the line width as in the example below using .eps graphics
+\begin{verbatim}
+   \usepackage[dvips]{graphicx} ...
+   \includegraphics[width=0.8\linewidth]{myfile.eps}
+\end{verbatim}
+or % Apr 2009 addition
+\begin{verbatim}
+   \usepackage[pdftex]{graphicx} ...
+   \includegraphics[width=0.8\linewidth]{myfile.pdf}
+\end{verbatim}
+for .pdf graphics.
+See section~4.4 in the graphics bundle documentation (\url{http://www.ctan.org/tex-archive/macros/latex/required/graphics/grfguide.ps})
+
+A number of width problems arise when LaTeX cannot properly hyphenate a
+line. Please give LaTeX hyphenation hints using the \verb+\-+ command.
+
+
+\subsubsection*{Acknowledgments}
+
+Use unnumbered third level headings for the acknowledgments. All
+acknowledgments, including those to funding agencies, go at the end of the paper.
+
+\bibliography{iclr2018_conference}
+\bibliographystyle{iclr2018_conference}
+
+\end{document}
