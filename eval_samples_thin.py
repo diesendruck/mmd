@@ -39,8 +39,7 @@ g_sorted_by_z = g[z_sort_order]
 
 # Plot results.
 plt.figure(figsize=(20, 15))
-plt.suptitle('Comparison: X, G, Z. ShapiroWilk(w,p)=({:.04f},{:.04f})'.format(
-    w_statistic, p_value), fontsize=20)
+plt.suptitle('Comparison: X, G, Z', fontsize=30)
 
 ax1 = plt.subplot(3, 1, 1)
 plt.hist(x, 30, normed=True, color='green', label='x', alpha=0.3)
@@ -71,12 +70,12 @@ plt.ylabel('Values g, x')
 plt.legend()
 
 plt.subplot(3, 4, 10)
-probplot(g, dist='norm', plot=pylab)
-plt.title('QQ Plot: G')
-
-plt.subplot(3, 4, 11)
 probplot(x, dist='norm', plot=pylab)
 plt.title('QQ Plot: X')
+
+plt.subplot(3, 4, 11)
+probplot(g, dist='norm', plot=pylab)
+plt.title('QQ Plot: G')
 
 plt.subplot(3, 4, 12)
 plt.scatter(z, g)
@@ -86,8 +85,21 @@ plt.ylabel('Generated value')
 
 filename = os.path.join(base_path, 'result_plot.png')
 plt.savefig(filename)
+plt.close()
 
 log_data = open(os.path.join(base_path, 'sample__log.txt'), 'r').read()
 log_data = log_data.replace('(',': ').replace(')', ': ')
-os.system(('echo "{}\n{}" | mutt momod@utexas.edu -s "1dgan result_plot"'
-           ' -a "{}"').format(base_path, log_data, filename))
+#os.system(('echo "{}\n{}" | mutt momod@utexas.edu -s "1dgan result_plot"'
+#           ' -a "{}"').format(base_path, log_data, filename))
+
+
+# Additional graphic/image for paper.
+plt.hist(g, 30, normed=True, color='green', label='g', alpha=0.7)
+xs = np.linspace(min(x), max(x), 100)
+ys_unthinned = 0.5 * ys1 + 0.5 * ys2
+plt.plot(xs, ys_unthinned, color='green',
+         label='pdf_unthinned', alpha=0.7)
+plt.xlabel('Simulations')
+plt.ylabel('Density')
+plt.tight_layout()
+plt.savefig('weighted_mmd_simulations.png')

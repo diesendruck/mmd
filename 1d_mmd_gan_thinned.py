@@ -3,9 +3,11 @@ from time import time
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.style.use('ggplot')
 import numpy as np
 import os
 import pdb
+import sys
 import tensorflow as tf
 layers = tf.layers
 from scipy.stats import norm
@@ -13,7 +15,7 @@ from scipy.stats import norm
 
 # Config.
 parser = argparse.ArgumentParser()
-parser.add_argument('--data_num', type=int, default=800)
+parser.add_argument('--data_num', type=int, default=1000)
 parser.add_argument('--gen_num', type=int, default=300)
 parser.add_argument('--z_dim', type=int, default=1)
 parser.add_argument('--width', type=int, default=3,
@@ -23,15 +25,17 @@ parser.add_argument('--depth', type=int, default=6,
 parser.add_argument('--sigma', type=float, default=0.5)
 parser.add_argument('--thin_a', type=float, default=0.5)
 parser.add_argument('--thin_b', type=float, default=0.5)
-parser.add_argument('--learning_rate', type=float, default=1e-2)
+parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
-parser.add_argument('--total_num_runs', type=int, default=10101)
-parser.add_argument('--save_iter', type=int, default=1500)
+parser.add_argument('--max_iter', type=int, default=50101)
+parser.add_argument('--save_iter', type=int, default=500)
 parser.add_argument('--expt', type=str, default='test')
 parser.add_argument('--weighting', type=str, default='logistic',
                     choices=['logistic', 'kernel'])
+parser.add_argument('--graph_data', type=int, default=0, choices=[0, 1])
+parser.add_argument('--testing', type=int, default=0, choices=[0, 1])
 
 args = parser.parse_args()
 data_num = args.data_num
@@ -44,10 +48,12 @@ thin_a = args.thin_a
 thin_b = args.thin_b
 learning_rate = args.learning_rate
 optimizer = args.optimizer
-total_num_runs = args.total_num_runs
+max_iter = args.max_iter
 save_iter = args.save_iter
 expt = args.expt
 weighting = args.weighting
+graph_data = args.graph_data
+testing = args.testing
 out_dim = 1
 activation = tf.nn.elu
 save_tag = 'expt{}_dn{}_gn{}_zd{}_w{}_d{}_lr{}_op_{}_sig{}_thin{}_wt{}'.format(
@@ -190,8 +196,48 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 
 # Define data.
 data_unthinned, data = generate_data(data_num)
+data_thinned = data
 data_num = len(data)
 gen_num = data_num
+if graph_data:
+    xs = np.linspace(min(data_unthinned), max(data_unthinned), 100)
+    ys1 = norm.pdf(xs, 0, 0.5)
+    ys2 = norm.pdf(xs, 2, 0.5)
+    y_thinned = 2. / 3. * ys1 + 1. / 3. * ys2
+    y_unthinned = 0.5 * ys1 + 0.5 * ys2
+
+    plt.plot(xs, y_unthinned, color='green', label='pdf', alpha=0.7)
+    plt.hist(data_unthinned, 30, normed=True, color='green', label='x unthinned', alpha=0.3)
+    plt.xlabel('x')
+    plt.ylabel('Density')
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    plt.savefig('unthinned_data.png')
+    plt.close()
+
+    plt.plot(xs, y_thinned, color='blue', label='pdf', alpha=0.7)
+    plt.hist(data, 30, normed=True, color='blue', label='x thinned', alpha=0.3)
+    plt.xlabel('x')
+    plt.ylabel('Density')
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    plt.savefig('thinned_data.png')
+    plt.close()
+
+    tx = 1 - prob_of_keeping(xs)
+    plt.plot(xs, tx, color='black', alpha=0.7)
+    plt.xlabel('x')
+    plt.ylabel('T(x)')
+    plt.ylim((-0.1, 1.1))
+    plt.yticks(np.linspace(0, 1, 11))
+    plt.axhline(0, color='black', alpha=0.2)
+    plt.axvline(0, color='black', alpha=0.2)
+    plt.tight_layout()
+    plt.savefig('thinning_fn.png')
+    plt.close()
+
+    print('Plotted unthinned_data.png, thinned_data.png, thinning_fn.png')
+    sys.exit('graph_data=1, graphed data')
 
 # Build model.
 x = tf.placeholder(tf.float64, [data_num, 1], name='x')
@@ -210,15 +256,25 @@ K_yy = K[data_num:, data_num:]
 K_xy = K[:data_num, data_num:]
 K_yy_upper = (tf.matrix_band_part(K_yy, 0, -1) - 
               tf.matrix_band_part(K_yy, 0, 0))
+num_combos_xx = data_num * (data_num - 1) / 2
 num_combos_yy = gen_num * (gen_num - 1) / 2
 v_tiled_horiz = tf.tile(v, [1, x_len + z_len])
 thinning_fn = prob_of_keeping(v_tiled_horiz, is_tf=True, weighting=weighting)
 p1_weights = 1. / thinning_fn 
+p2_weights = tf.transpose(p1_weights) 
+p1p2_weights_xx = p1_weights[:data_num, :data_num] * p2_weights[:data_num, :data_num]
+p1p2_weights_xx_normed = p1p2_weights_xx / tf.reduce_sum(p1p2_weights_xx)
 p1_weights_xy = p1_weights[:data_num, data_num:]
 p1_weights_xy_normed = p1_weights_xy / tf.reduce_sum(p1_weights_xy)
+Kw_xx = K[:data_num, :data_num] * p1p2_weights_xx_normed
+Kw_xx_upper = (tf.matrix_band_part(Kw_xx, 0, -1) - 
+               tf.matrix_band_part(Kw_xx, 0, 0))
 Kw_xy = K[:data_num, data_num:] * p1_weights_xy_normed
-mmd = (tf.reduce_sum(K_yy_upper) / num_combos_yy -
+mmd = (tf.reduce_sum(Kw_xx_upper) / num_combos_xx +
+       tf.reduce_sum(K_yy_upper) / num_combos_yy -
        2 * tf.reduce_sum(Kw_xy))
+#mmd = (tf.reduce_sum(K_yy_upper) / num_combos_yy -
+#       2 * tf.reduce_sum(Kw_xy))
 
 g_vars = [var for var in tf.global_variables() if 'generator' in var.name]
 if optimizer == 'adagrad':
@@ -253,7 +309,7 @@ saver, checkpoints_dir, graphs_dir, logs_dir = prepare_dirs_and_logging(expt)
 load_checkpoints(sess, saver, checkpoints_dir)
 print args
 start_time = time()
-for i in range(total_num_runs):
+for i in range(max_iter):
     sess.run(g_optim,
              feed_dict={
                  z: get_random_z(gen_num, z_dim),
@@ -288,7 +344,7 @@ for i in range(total_num_runs):
             m, s = divmod(elapsed_time, 60)
             h, m = divmod(m, 60)
             elapsed_time_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-            total_est = elapsed_time / i * total_num_runs
+            total_est = elapsed_time / i * max_iter
             m, s = divmod(total_est, 60)
             h, m = divmod(m, 60)
             total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
@@ -296,5 +352,32 @@ for i in range(total_num_runs):
             print ('\n  Time (s). Elapsed: {}, Avg/iter: {:.4f},'
                    ' Total est.: {}').format(elapsed_time_str, time_per_iter,
                                              total_est_str)
+
+    if testing == 1:
+        if i == 6000 or i == 8000:
+            make_samples = True
+            pdb.set_trace()
+            while make_samples == True:
+                for j in range(10):
+                    z_sample = get_random_z(gen_num, z_dim)
+                    x_sample = np.random.choice(data_thinned, (data_num, 1))
+                    mmd_out, g_out = sess.run(
+                        [mmd, g], feed_dict={
+                            z: z_sample,
+                            x: x_sample})
+                    print mmd_out
+                print('got 10 for data_thinned, choose to set make_samples=False, or continue')
+                pdb.set_trace()
+
+                for k in range(10):
+                    z_sample = get_random_z(gen_num, z_dim)
+                    x_sample = np.random.choice(data_unthinned, (data_num, 1))
+                    mmd_out, g_out = sess.run(
+                        [mmd, g], feed_dict={
+                            z: z_sample,
+                            x: x_sample})
+                    print mmd_out
+                print('got 10 for data_unthinned, choose to set make_samples=False, or continue')
+                pdb.set_trace()
 
 os.system('python eval_samples_thin.py --expt="{}"'.format(expt))

@@ -62,15 +62,23 @@ probplot(x, dist='norm', plot=pylab)
 plt.title('QQ Plot: X')
 
 plt.subplot(248)
-#plt.title('Mapping from noise z to g')
-#plt.xlabel('Samples')
-#plt.ylabel('Values z, g')
-#plt.plot(z_sorted, color='green', label='z_sorted', alpha=0.3)
-#plt.plot(g_sorted_by_z, color='blue', label='g_sorted_by_z', alpha=0.3)
-#plt.legend()
 plt.scatter(z, g)
 plt.title('Mapping from noise z to g')
 plt.xlabel('Noise z')
 plt.ylabel('Generated value')
 
 plt.savefig('result_plot.png')
+plt.close()
+
+# Additional graphic/image for paper.
+xs = np.linspace(min(x), max(x), 100)
+ys1 = norm.pdf(xs, 0, 0.5)
+ys2 = norm.pdf(xs, 2, 0.5)
+ys_unthinned = 2./3 * ys1 + 1./3 * ys2
+
+plt.hist(g, 30, normed=True, color='blue', label='g', alpha=0.7)
+plt.plot(xs, ys_unthinned, color='blue', label='pdf_unthinned', alpha=0.7)
+plt.xlabel('Simulations')
+plt.ylabel('Density')
+plt.tight_layout()
+plt.savefig('mmd_simulations.png')
