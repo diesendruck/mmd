@@ -3,18 +3,23 @@ matplotlib.use('Agg')
 matplotlib.rcParams.update({'font.size': 12})
 import matplotlib.pyplot as plt
 plt.style.use('ggplot')
+import argparse
 import pylab
 import pdb
 import numpy as np
 import os
 from scipy.stats import shapiro, probplot, norm
 
-
-m = 10000
-chunk_size = 200
-proposals_per_chunk = 10
-corr = 0.9
-
+parser = argparse.ArgumentParser()
+parser.add_argument('--num_data', type=int, default=10000)
+parser.add_argument('--chunk_size', type=int, default=200)
+parser.add_argument('--proposals_per_chunk', type=int, default=10)
+parser.add_argument('--corr', type=float, default=0.6, help='On [-1, 1]')
+args = parser.parse_args()
+m = args.num_data 
+chunk_size = args.chunk_size 
+proposals_per_chunk = args.proposals_per_chunk 
+corr = args.corr
 
 # MAKE QQ PLOTS
 plt.subplot(131)
@@ -41,10 +46,8 @@ plt.subplots_adjust(top=0.85)
 plt.savefig('qq_plots.png')
 plt.close()
 
-os.system('echo $PWD | mutt momod@utexas.edu -s "optimal_representation" -a "orig_data.png"  -a "all_proposals.png" -a "qq_plots.png" -a "particles_datacorrelated_corr{}_nd{}_chunk{}_ppc{}_it1001_lr1.0_sig1.0.png"'.format(corr, m, chunk_size, proposals_per_chunk))
-
-
 # COMPUTE COMPARISONS FOR VAR(X_BARS) 
+print 'computing x_bars_corr, x_bars_stdnorm'
 x_bars_corr = []
 for i in range(1000):
     data = np.zeros(m)
@@ -85,5 +88,24 @@ print '  var(x_bars_stdnorm) = {}'.format(np.var(x_bars_stdnorm))
 x_bars_mmd = np.genfromtxt('x_bars.txt')
 print 'MMD SAMPLING - {} expts'.format(len(x_bars_mmd))
 print '  var(x_bars_mmd) = {}'.format(np.var(x_bars_mmd))
+
+plt.suptitle('x_bars, corr={}'.format(corr))
+ax1 = plt.subplot(131)
+plt.hist(x_bars_corr, 30)
+plt.title('x_bars_corr')
+plt.subplot(132, sharex=ax1)
+plt.hist(x_bars_stdnorm, 30)
+plt.title('x_bars_stdnorm')
+plt.subplot(133, sharex=ax1)
+plt.hist(x_bars_mmd, 30)
+plt.title('x_bars_mmd')
+plt.savefig('histograms_x_bars.png')
+
+os.system((
+    'echo $PWD | mutt momod@utexas.edu -s "optimal_representation" -a '
+    '"orig_data.png"  -a "all_proposals.png" -a "qq_plots.png" -a '
+    '"particles_datacorrelated_corr{}_nd{}_chunk{}_ppc{}_it1001_lr1.0_sig1.0'
+    '.png" -a "histograms_x_bars.png"').format(
+        corr, m, chunk_size, proposals_per_chunk))
 
 pdb.set_trace()

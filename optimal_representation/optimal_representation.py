@@ -291,7 +291,6 @@ for i in range(m):
 
 # Compute variance of x_bars.
 np.save('all_proposals.npy', all_proposals)
-np.save('p_orig.npy', p_orig)
 num_proposals_generated = num_data / chunk_size * proposals_per_chunk
 print 'n = {}'.format(num_proposals_generated)
 print '1/n = {}'.format(1. / num_proposals_generated)
