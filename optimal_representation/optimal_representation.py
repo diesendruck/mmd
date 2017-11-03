@@ -176,12 +176,12 @@ def energy(data, gen, sigma=1.):
     return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
 
 
-def optimize(data, gen, n=5000, learning_rate=1e-2, dist='mmd',
+def optimize(partition, gen, n=5000, learning_rate=1e-2, dist='mmd',
              sigma=1.):
     '''Runs alternating optimizations, n times through proposal points.
 
     Args:
-      data: 1D numpy array of any length, e.g. 100.
+      partition: 1D numpy array of any length, e.g. 100.
       gen: 1D numpy array of any length, e.g. 10.
       n: Scalar, number of times to loop through updates for all vars.
       learning_rate: Scalar, amount to move point with each gradient update.
@@ -191,13 +191,13 @@ def optimize(data, gen, n=5000, learning_rate=1e-2, dist='mmd',
     Returns:
       gens: 2D numpy array of trace of generated proposal points.
     '''
-    e, mmd, _, _ = energy(data, gen, sigma=sigma)
+    e, mmd, _, _ = energy(partition, gen, sigma=sigma)
     gens = np.zeros((n, len(gen)))
     #print '\nit0: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(np.sort(gen), e, mmd)
     print '\n  it0: e: {:.8f}, mmd: {:.8f}'.format(e, mmd)
     gens[0, :] = gen
     for it in range(1, n):
-        _, mmd_d_g, _, grads_mmd_d_g = energy(data, gen, sigma=sigma) 
+        _, mmd_d_g, _, grads_mmd_d_g = energy(partition, gen, sigma=sigma) 
         gen -= learning_rate * grads_mmd_d_g
         gens[it, :] = gen
 
@@ -255,9 +255,9 @@ for i in range(m):
     p = np.random.permutation(p_orig)
     partitions = [p[i: i + chunk_size] for i in xrange(0, len(p), chunk_size)]
 
-    save_tag = 'data{}_nd{}_chunk{}_ppc{}_it{}_lr{}_sig{}'.format(
-        data_source, num_data, chunk_size, proposals_per_chunk, max_iter, lr,
-        sigma)
+    save_tag = 'data{}_corr{}_nd{}_chunk{}_ppc{}_it{}_lr{}_sig{}'.format(
+        data_source, corr, num_data, chunk_size, proposals_per_chunk, max_iter,
+        lr, sigma)
     print '  Config: {}'.format(save_tag)
 
     all_proposals = np.array([])
