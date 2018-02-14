@@ -70,15 +70,16 @@ plt.ylabel('Generated value')
 plt.savefig('result_plot.png')
 plt.close()
 
-# Additional graphic/image for paper.
+# Additional graphic/image for paper, Figure 3d.
 xs = np.linspace(min(x), max(x), 100)
 ys1 = norm.pdf(xs, 0, 0.5)
 ys2 = norm.pdf(xs, 2, 0.5)
-ys_unthinned = 2./3 * ys1 + 1./3 * ys2
+ys = (1. / 0.75) * (0.5 * ys1 + 0.5 * ys2) * (0.5 / (1 + np.exp(10 * (xs - 1))) + 0.5)
 
 plt.hist(g, 30, normed=True, color='blue', label='g', alpha=0.7)
-plt.plot(xs, ys_unthinned, color='blue', label='pdf_unthinned', alpha=0.7)
+plt.plot(xs, ys, color='blue', label='pdf', alpha=0.7)
 plt.xlabel('Simulations')
 plt.ylabel('Density')
+plt.legend()
 plt.tight_layout()
 plt.savefig('mmd_simulations.png')

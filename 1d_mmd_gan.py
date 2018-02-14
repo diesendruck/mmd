@@ -47,10 +47,15 @@ save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(data_num, z_dim, width, depth,
                                                  learning_rate, optimizer)
 
 # Set up true, training data.
-data_thinned = np.concatenate(
-    (np.random.normal(0, 0.5, 750), np.random.normal(2, 0.5, 250)))
+#data_thinned = np.concatenate(
+#    (np.random.normal(0, 0.5, 750), np.random.normal(2, 0.5, 250)))
+def prob_of_thinning(x):
+    return 0.5 / (1 + np.exp(10 * (x - 1))) + 0.5
 data_unthinned = np.concatenate(
     (np.random.normal(0, 0.5, 500), np.random.normal(2, 0.5, 500)))
+data_thinned = np.array([candidate for candidate in data_unthinned if
+    np.random.binomial(1, prob_of_thinning(candidate))])
+
 data = data_thinned
 data_num = len(data)
 gen_num = int(0.75 * data_num)
@@ -161,7 +166,7 @@ for i in range(total_num_runs):
 
         print '\niter:{}, mmd:{}'.format(i, mmd_out)
         print '  min:{}, max:{}'.format(min(g_out), max(g_out))
-        '''
+
         fig, ax = plt.subplots()
         ax.hist(g_out, 20, normed=True, color='blue', alpha=0.3)
         ax.hist(np.random.randn(data_num, 1), 20, normed=True, color='green',
@@ -172,7 +177,6 @@ for i in range(total_num_runs):
         ax.set_title('mmd = {}'.format(mmd_out))
         plt.savefig('hist_{}_i{}.png'.format(save_tag, i))
         plt.close(fig)
-        '''
 
         if i > 0:
             elapsed_time = time() - start_time
