@@ -8,6 +8,8 @@ import os
 import pdb
 import tensorflow as tf
 layers = tf.layers
+import pandas as pd
+import seaborn as sb
 
 
 # Config.
@@ -41,11 +43,9 @@ activation = tf.nn.elu
 
 # Load data.
 if data_file:
-    data = np.loadtxt(data_file,
-                      converters={0: lambda s: float(s.strip() or 0)},
-                      skiprows=1)
+    data = np.loadtxt(open(data_file, 'rb'), delimiter=' ')
+    data_num = len(data)
     out_dim = data.shape[1]
-    pdb.set_trace()
 else:
     n1 = data_num / 2
     n2 = data_num - n1
@@ -96,7 +96,7 @@ sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
 sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
 exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
 K = 0.0
-sigma_list = [0.1, 1., 2., 8.]
+sigma_list = [0.01, 0.05, 0.1, 0.5, 1.0, 2.0]
 for sigma in sigma_list:
     gamma = 1.0 / (2 * sigma**2)
     K += tf.exp(-gamma * exp_object)
@@ -124,9 +124,9 @@ g_optim = opt(learning_rate).minimize(mmd, var_list=g_vars)
 init_op = tf.global_variables_initializer()
 sess = tf.Session()
 sess.run(init_op)
-print args
+print save_tag
 start_time = time()
-for i in range(max_step):
+for step in range(max_step):
     random_batch_data = np.array(
         [data[d] for d in np.random.choice(len(data), batch_size)])
     random_batch_z = get_random_z(batch_size, z_dim)
@@ -136,26 +136,42 @@ for i in range(max_step):
                  x: random_batch_data})
 
     # Occasionally log/plot results.
-    if i % log_step == 0:
+    if step % log_step == 0:
         mmd_out, g_out = sess.run(
             [mmd, g], feed_dict={
                 z: random_batch_z,
                 x: random_batch_data})
-        print '\niter:{} mmd = {}'.format(i, mmd_out)
-        fig, ax = plt.subplots()
-        ax.scatter(*zip(*data), color='gray', alpha=0.05)
-        ax.scatter(*zip(*g_out), color='green', alpha=0.3)
-        plt.savefig(os.path.join(
-            log_dir, 'scatter_{}_i{}.png'.format(save_tag, i)))
-        plt.close(fig)
+        print '\niter:{} mmd = {}'.format(step, mmd_out)
+        np.save('g_out.npy', g_out)
 
-        if i > 0:
+        if out_dim > 2:
+            indices_to_plot = [0, 1, 2]
+        elif out_dim == 2:
+            indices_to_plot = range(out_dim)
+            fig, ax = plt.subplots()
+            ax.scatter(*zip(*data), color='gray', alpha=0.05)
+            ax.scatter(*zip(*g_out), color='green', alpha=0.3)
+            plt.savefig(os.path.join(
+                log_dir, 'scatter_{}_i{}.png'.format(save_tag, step)))
+            plt.close(fig)
+        else:
+            indices_to_plot = range(out_dim)
+
+        pairplot_data = sb.pairplot(
+            pd.DataFrame(random_batch_data[:, indices_to_plot]))
+        pairplot_data.savefig('pairplot_data.png')
+        pairplot_simulation = sb.pairplot(
+            pd.DataFrame(g_out[:, indices_to_plot]))
+        pairplot_simulation.savefig('pairplot_simulation.png')
+        plt.close('all')
+
+        if step > 0:
             elapsed_time = time() - start_time
-            time_per_iter = elapsed_time / i
-            total_est = elapsed_time / i * max_step
+            time_per_iter = elapsed_time / step
+            total_est = elapsed_time / step * max_step
             m, s = divmod(total_est, 60)
             h, m = divmod(m, 60)
             total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-            print ('\nTime (s). Elapsed: {:.2f}, time/iter: {:.4f},'
-                   ' Total est.: {}').format(elapsed_time, time_per_iter,
+            print ('\nIter: {}, time (s): {:.2f}, time/iter: {:.4f},'
+                   ' Total est.: {}').format(step, elapsed_time, time_per_iter,
                                              total_est_str)
