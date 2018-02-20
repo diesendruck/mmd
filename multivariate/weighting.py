@@ -99,4 +99,3 @@ os.system('echo $PWD | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
           '"plots/plot_data_support_subset.png" -a "plots/weights_data.png" -a '
           '"plots/weights_subset.png"')
 print('Emailed results to momod@utexas.edu.')
-pdb.set_trace()
