@@ -11,4 +11,4 @@ SNAP=1
 M=50
 DATA_FILE='gp_data.txt'
 
-python multivariate_mmd_gan.py --data_num=$M; python weighting.py --snap=$SNAP;
+python multivariate_mmd_gan.py --batch_size=$M; python weighting.py --snap=$SNAP;
