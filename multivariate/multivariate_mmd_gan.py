@@ -15,15 +15,15 @@ import pandas as pd
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=100)
-parser.add_argument('--z_dim', type=int, default=2)
+parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--z_dim', type=int, default=3)
 parser.add_argument('--width', type=int, default=10,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=10,
+parser.add_argument('--depth', type=int, default=20,
                     help='num of generator layers')
-parser.add_argument('--log_step', type=int, default=10000)
+parser.add_argument('--log_step', type=int, default=1000)
 parser.add_argument('--max_step', type=int, default=200000)
-parser.add_argument('--learning_rate', type=float, default=1e-4)
+parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
 parser.add_argument('--data_file', type=str, default=None)
@@ -104,7 +104,8 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=2,
         x = layers.dense(z, width, activation=activation)
 
         for idx in range(depth - 1):
-            x = layers.dense(x, width, activation=activation)
+            x_ = layers.dense(x, width, activation=activation)
+            x = layers.batch_normalization(x_) + x  # {batchnorm, shortcut}
 
         out = layers.dense(x, out_dim, activation=None)
     vars_g = tf.contrib.framework.get_variables(vs_g)
