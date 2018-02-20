@@ -32,7 +32,7 @@ def nearest(target, arr):
 
 # Load data and support points.
 data = np.loadtxt(open(data_file, 'rb'), delimiter=' ')
-support_points = np.load('g_out.npy')
+support_points = np.load('logs/g_out.npy')
 
 assert data.shape[1] == support_points.shape[1], \
     'dimension of data and support points.g must match'
@@ -43,7 +43,7 @@ if snap:
     for index, sp in enumerate(support_points):
         _, nearest_neighbor, _ = nearest(sp, data)
         subset[index] = nearest_neighbor
-    np.save('subset.npy', subset)
+    np.save('logs/subset.npy', subset)
 else:
     subset = support_points
 
@@ -60,7 +60,7 @@ for i in range(n_subset):
     min_non_diag_distance = sorted(pairwise_distances[i])[1]
     subset_weights[i] = min_non_diag_distance
 subset_weights = subset_weights / max(subset_weights)
-np.save('weights_subset.npy', subset_weights)
+np.save('logs/weights_subset.npy', subset_weights)
 
 # Compute data weights.
 data_weights = np.zeros(data.shape[0])
@@ -68,7 +68,7 @@ for index, dp in enumerate(data):
     nearest_dist, _, nearest_index = nearest(dp, subset) 
     data_weights[index] = subset_weights[nearest_index] / (nearest_dist + 1e-6)
 data_weights = data_weights / max(data_weights)
-np.save('weights_data.npy', data_weights)
+np.save('logs/weights_data.npy', data_weights)
 
 
 # PLOTTING: Plot data, support points, and subset.
@@ -95,7 +95,8 @@ ax.legend()
 plt.savefig('plots/weights_data.png')
 
 os.system('echo $PWD | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
-          '-a "g_out.npy" -a "plots/plot_data_subset.png" -a '
+          '-a "logs/g_out.npy" -a "plots/plot_data_subset.png" -a '
           '"plots/plot_data_support_subset.png" -a "plots/weights_data.png" -a '
           '"plots/weights_subset.png"')
 print('Emailed results to momod@utexas.edu.')
+pdb.set_trace()

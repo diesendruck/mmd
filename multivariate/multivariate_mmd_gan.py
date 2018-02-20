@@ -16,13 +16,14 @@ import pandas as pd
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
 parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--gen_num', type=int, default=200)
 parser.add_argument('--z_dim', type=int, default=3)
 parser.add_argument('--width', type=int, default=10,
                     help='width of generator layers')
 parser.add_argument('--depth', type=int, default=20,
                     help='num of generator layers')
 parser.add_argument('--log_step', type=int, default=1000)
-parser.add_argument('--max_step', type=int, default=20000)
+parser.add_argument('--max_step', type=int, default=10000)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
@@ -31,6 +32,7 @@ parser.add_argument('--data_file', type=str, default=None)
 args = parser.parse_args()
 data_num = args.data_num
 batch_size = args.batch_size
+gen_num = args.gen_num
 z_dim = args.z_dim
 width = args.width
 depth = args.depth
@@ -57,8 +59,9 @@ else:
     out_dim = data.shape[1]
 
 # Set save tag, as a function of config parameters.
-save_tag = 'dn{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
-    data_num, z_dim, width, depth, learning_rate, optimizer)
+save_tag = 'dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
+    data_num, batch_size, gen_num, z_dim, width, depth, learning_rate,
+    optimizer)
 
 # Set up log dir.
 log_dir = 'logs'
@@ -146,23 +149,24 @@ def compute_mmd(enc_x, enc_g):
     K_xy = K[:batch_size, batch_size:]
     K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
     K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
-    num_combos = batch_size * (batch_size - 1) / 2
-    mmd = (tf.reduce_sum(K_xx_upper) / num_combos +
-           tf.reduce_sum(K_yy_upper) / num_combos -
-           2 * tf.reduce_sum(K_xy) / (batch_size * batch_size))
+    num_combos_x = batch_size * (batch_size - 1) / 2
+    num_combos_y = gen_num * (gen_num - 1) / 2
+    mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
+           tf.reduce_sum(K_yy_upper) / num_combos_y -
+           2 * tf.reduce_sum(K_xy) / (batch_size * gen_num))
     return mmd
 
 
 # Build model.
 x = tf.placeholder(tf.float64, [batch_size, out_dim], name='x')
-z = tf.placeholder(tf.float64, [batch_size, z_dim], name='z')
+z = tf.placeholder(tf.float64, [gen_num, z_dim], name='z')
 
 g, g_vars = generator(
     z, width=width, depth=depth, activation=activation, out_dim=out_dim)
 h_out, ae_out, enc_vars, dec_vars = autoencoder(tf.concat([x, g], 0),
     width=width, depth=depth, activation=activation, z_dim=z_dim, reuse=False)
-enc_x, enc_g = tf.split(h_out, 2)
-ae_x, ae_g = tf.split(ae_out, 2)
+enc_x, enc_g = tf.split(h_out, [batch_size, gen_num])
+ae_x, ae_g = tf.split(ae_out, [batch_size, gen_num])
 
 ae_loss = tf.reduce_mean(tf.square(ae_x - x))
 
@@ -225,7 +229,7 @@ start_time = time()
 for step in range(max_step):
     random_batch_data = np.array(
         [data[d] for d in np.random.choice(len(data), batch_size)])
-    random_batch_z = get_random_z(batch_size, z_dim)
+    random_batch_z = get_random_z(gen_num, z_dim)
     sess.run([d_optim, g_optim],
              feed_dict={
                  z: random_batch_z,
