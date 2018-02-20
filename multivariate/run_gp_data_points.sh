@@ -12,5 +12,5 @@ M=200
 DATA_FILE='gp_data.txt'
 
 python multivariate_mmd_gan.py --data_file=$DATA_FILE --gen_num=$M --max_step=50000;
-python weighting.py --data_file=$DATA_FILE --snap=1;
 python weighting.py --data_file=$DATA_FILE --snap=0;
+python weighting.py --data_file=$DATA_FILE --snap=1;

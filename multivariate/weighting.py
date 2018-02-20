@@ -94,8 +94,8 @@ ax.plot(data_weights, color='gray', label='data_weights')
 ax.legend()
 plt.savefig('plots/weights_data.png')
 
-os.system('echo $PWD | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
+os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
           '-a "logs/g_out.npy" -a "plots/plot_data_subset.png" -a '
           '"plots/plot_data_support_subset.png" -a "plots/weights_data.png" -a '
-          '"plots/weights_subset.png"')
+          '"plots/weights_subset.png"'.format('  '+str(snap)))
 print('Emailed results to momod@utexas.edu.')
