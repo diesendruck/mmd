@@ -22,7 +22,7 @@ parser.add_argument('--width', type=int, default=10,
 parser.add_argument('--depth', type=int, default=20,
                     help='num of generator layers')
 parser.add_argument('--log_step', type=int, default=1000)
-parser.add_argument('--max_step', type=int, default=200000)
+parser.add_argument('--max_step', type=int, default=20000)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])

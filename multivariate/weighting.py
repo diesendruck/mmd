@@ -63,11 +63,11 @@ subset_weights = subset_weights / max(subset_weights)
 np.save('weights_subset.npy', subset_weights)
 
 # Compute data weights.
-c = 1.0  # Higher value means weight drops faster as distance increases.
 data_weights = np.zeros(data.shape[0])
 for index, dp in enumerate(data):
     nearest_dist, _, nearest_index = nearest(dp, subset) 
-    data_weights[index] = subset_weights[nearest_index] / (c * nearest_dist + 1e-6)
+    data_weights[index] = subset_weights[nearest_index] / (nearest_dist + 1e-6)
+data_weights = data_weights / max(data_weights)
 np.save('weights_data.npy', data_weights)
 
 
@@ -93,3 +93,9 @@ fig, ax = plt.subplots()
 ax.plot(data_weights, color='gray', label='data_weights')
 ax.legend()
 plt.savefig('plots/weights_data.png')
+
+os.system('echo $PWD | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
+          '-a "g_out.npy" -a "plots/plot_data_subset.png" -a '
+          '"plots/plot_data_support_subset.png" -a "plots/weights_data.png" -a '
+          '"plots/weights_subset.png"')
+print('Emailed results to momod@utexas.edu.')
