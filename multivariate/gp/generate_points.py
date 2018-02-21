@@ -83,7 +83,7 @@ def generate_points(tf_setup=tf_setup, mode='coreset'):
                 z: random_batch_z})
 
     support_points, coreset, weights_estimation_pts, weights_data = \
-        get_estimation_points(mode=mode, support_points=g_out, email=True)
+        get_estimation_points(mode=mode, support_points=g_out)
     return support_points, coreset, weights_estimation_pts, weights_data
 
 test = 1
