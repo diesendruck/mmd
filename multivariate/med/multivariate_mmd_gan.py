@@ -10,6 +10,7 @@ import tensorflow as tf
 layers = tf.layers
 import pandas as pd
 import seaborn as sb
+from scipy.stats import scoreatpercentile
 
 
 # Config.
@@ -17,16 +18,17 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
 parser.add_argument('--batch_size', type=int, default=200)
 parser.add_argument('--gen_num', type=int, default=200)
-parser.add_argument('--z_dim', type=int, default=10)
-parser.add_argument('--width', type=int, default=10,
-                    help='width of generator layers')
-parser.add_argument('--depth', type=int, default=20,
-                    help='num of generator layers')
-parser.add_argument('--log_step', type=int, default=3000)
-parser.add_argument('--max_step', type=int, default=100000)
+parser.add_argument('--z_dim', type=int, default=16)
+parser.add_argument('--width', type=int, default=100,
+    help='width of generator layers')
+parser.add_argument('--depth', type=int, default=3, 
+    help='num of generator layers')
+parser.add_argument('--lambda_mmd', type=float, default=1e-3)
+parser.add_argument('--log_step', type=int, default=2000)
+parser.add_argument('--max_step', type=int, default=500000)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
-                    choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
+    choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
 parser.add_argument('--data_file', type=str, default=None)
 
 args = parser.parse_args()
@@ -36,6 +38,7 @@ gen_num = args.gen_num
 z_dim = args.z_dim
 width = args.width
 depth = args.depth
+lambda_mmd = args.lambda_mmd
 log_step = args.log_step
 max_step = args.max_step
 learning_rate = args.learning_rate
@@ -43,20 +46,68 @@ optimizer = args.optimizer
 data_file = args.data_file
 activation = tf.nn.elu
 
+
+def fivenum(v):
+    """Returns Tukey's five number summary (minimum, lower-hinge, median, upper-hinge, maximum) for the input vector, a list or array of numbers based on 1.5 times the interquartile distance"""
+    try:
+        np.sum(v)
+    except TypeError:
+        print('Error: you must provide a list or array of only numbers')
+    q1 = scoreatpercentile(v,25)
+    q3 = scoreatpercentile(v,75)
+    iqd = q3-q1
+    md = np.median(v)
+    whisker = 1.5*iqd
+    return np.min(v), md-whisker, md, md+whisker, np.max(v)
+
+
+def build_toy_data():
+    num_clusters = 3
+    d = 5
+    n1 = data_num / num_clusters
+    n2 = data_num / num_clusters
+    n3 = data_num / num_clusters
+    n1 = data_num / num_clusters
+    cluster1 = np.random.multivariate_normal(
+        [-2., 5., 10., 1., -15.], np.eye(d), n1)
+    cluster2 = np.random.multivariate_normal(
+        [6., 6., 6., 6., 6.], np.eye(d), n2)
+    cluster3 = np.random.multivariate_normal(
+        [0., -100., 2., 30, 1.5], np.eye(d), n3)
+    cluster4 = np.random.multivariate_normal(
+        [10., -10., 6., 0., 15], np.eye(d), n3)
+    data = np.concatenate((cluster1, cluster2, cluster3, cluster4))
+    return data
+    #n1 = data_num / 2
+    #n2 = data_num - n1
+    #cluster1 = np.random.multivariate_normal(
+    #    [-2., 5.], [[1., .9], [.9, 1.]], n1)
+    #cluster2 = np.random.multivariate_normal(
+    #    [6., 6.], [[1., 0.], [0., 1.]], n2)
+    #data = np.concatenate((cluster1, cluster2))
+
+
 # Load data.
 if data_file:
     data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    num_cols = 5
+    #data = data[:, :num_cols]  # Just the first X cols.
+    print('\nRaw data:')
+    for i in range(data.shape[1]):
+        print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
+            *fivenum(data[:,i])))
+    print('\nNormed data:')
+    data = (data - data.mean(0))/data.std(0)
+    for i in range(data.shape[1]):
+        print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
+            *fivenum(data[:,i])))
     data_num = len(data)
     out_dim = data.shape[1]
 else:
-    n1 = data_num / 2
-    n2 = data_num - n1
-    cluster1 = np.random.multivariate_normal(
-        [-2., 5.], [[1., .9], [.9, 1.]], n1)
-    cluster2 = np.random.multivariate_normal(
-        [6., 6.], [[1., 0.], [0., 1.]], n2)
-    data = np.concatenate((cluster1, cluster2))
+    data = build_toy_data()
+    data = (data - data.mean(0))/data.std(0)
     out_dim = data.shape[1]
+
 
 # Set save tag, as a function of config parameters.
 save_tag = 'dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
@@ -71,8 +122,17 @@ if not os.path.exists(log_dir):
 
 def get_random_z(gen_num, z_dim):
     """Generates 2d array of noise input data."""
-    return np.random.uniform(size=[gen_num, z_dim],
-                             low=-1.0, high=1.0)
+    #return np.random.uniform(size=[gen_num, z_dim],
+    #                         low=-1.0, high=1.0)
+    return np.random.normal(size=[gen_num, z_dim])
+
+
+def dense(x, width, activation, batch_residual=False):
+    if not batch_residual:
+        return layers.dense(x, width, activation=activation)
+    else:
+        x_ = layers.dense(x, width, activation=activation, use_bias=False)
+        return layers.batch_normalization(x_) + x
 
 
 def autoencoder(x, width=3, depth=3, activation=tf.nn.elu, z_dim=3,
@@ -83,7 +143,7 @@ def autoencoder(x, width=3, depth=3, activation=tf.nn.elu, z_dim=3,
         x = layers.dense(x, width, activation=activation)
 
         for idx in range(depth - 1):
-            x = layers.dense(x, width, activation=activation)
+            x = dense(x, width, activation=activation, batch_residual=True)
 
         h = layers.dense(x, z_dim, activation=None)
 
@@ -91,7 +151,7 @@ def autoencoder(x, width=3, depth=3, activation=tf.nn.elu, z_dim=3,
         x = layers.dense(h, width, activation=activation)
 
         for idx in range(depth - 1):
-            x = layers.dense(x, width, activation=activation)
+            x = dense(x, width, activation=activation, batch_residual=True)
 
         ae = layers.dense(x, out_dim, activation=None)
 
@@ -107,8 +167,7 @@ def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=2,
         x = layers.dense(z, width, activation=activation)
 
         for idx in range(depth - 1):
-            x_ = layers.dense(x, width, activation=activation)
-            x = layers.batch_normalization(x_) + x  # {batchnorm, shortcut}
+            x = dense(x, width, activation=activation, batch_residual=True)
 
         out = layers.dense(x, out_dim, activation=None)
     vars_g = tf.contrib.framework.get_variables(vs_g)
@@ -132,29 +191,57 @@ def discriminator(x, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
     return y_logit, d_vars 
 
 
-def compute_mmd(enc_x, enc_g):
+def compute_mmd(enc_x, enc_g, use_tf=True):
     """Computes mmd between two inputs of size [batch_size, ...]."""
-    v = tf.concat([enc_x, enc_g], 0)
-    VVT = tf.matmul(v, tf.transpose(v))
-    sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
-    sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
-    exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
-    K = 0.0
-    sigma_list = [0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 4.0]
-    for sigma in sigma_list:
-        gamma = 1.0 / (2 * sigma**2)
-        K += tf.exp(-gamma * exp_object)
-    K_xx = K[:batch_size, :batch_size]
-    K_yy = K[batch_size:, batch_size:]
-    K_xy = K[:batch_size, batch_size:]
-    K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
-    K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
-    num_combos_x = batch_size * (batch_size - 1) / 2
-    num_combos_y = gen_num * (gen_num - 1) / 2
-    mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
-           tf.reduce_sum(K_yy_upper) / num_combos_y -
-           2 * tf.reduce_sum(K_xy) / (batch_size * gen_num))
-    return mmd
+    if use_tf:
+        v = tf.concat([enc_x, enc_g], 0)
+        VVT = tf.matmul(v, tf.transpose(v))
+        sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
+        sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
+        exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+        K = 0.0
+        #sigma_list = [1, 4, 16, 64, 256]
+        sigma_list = [0.1, 0.5, 1.0]
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += tf.exp(-gamma * exp_object)
+        K_xx = K[:batch_size, :batch_size]
+        K_yy = K[batch_size:, batch_size:]
+        K_xy = K[:batch_size, batch_size:]
+        K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
+        K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
+        num_combos_x = batch_size * (batch_size - 1) / 2
+        num_combos_y = gen_num * (gen_num - 1) / 2
+        mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
+               tf.reduce_sum(K_yy_upper) / num_combos_y -
+               2 * tf.reduce_sum(K_xy) / (batch_size * gen_num))
+        return mmd
+    else:
+        if len(enc_x.shape) == 1:
+            enc_x = np.reshape(enc_x, [-1, 1])
+            enc_g = np.reshape(enc_g, [-1, 1])
+        v = np.concatenate((enc_x, enc_g), 0)
+        VVT = np.matmul(v, np.transpose(v))
+        sqs = np.reshape(np.diag(VVT), [-1, 1])
+        sqs_tiled_horiz = np.tile(sqs, np.transpose(sqs).shape)
+        exp_object = sqs_tiled_horiz - 2 * VVT + np.transpose(sqs_tiled_horiz)
+        K = 0.0
+        #sigma_list = [1, 4, 16, 64, 256]
+        sigma_list = [0.1, 0.5, 1.0]
+        for sigma in sigma_list:
+            gamma = 1.0 / (2.0 * sigma**2)
+            K += np.exp(-gamma * exp_object)
+        K_xx = K[:batch_size, :batch_size]
+        K_yy = K[batch_size:, batch_size:]
+        K_xy = K[:batch_size, batch_size:]
+        K_xx_upper = np.triu(K_xx)
+        K_yy_upper = np.triu(K_yy)
+        num_combos_x = batch_size * (batch_size - 1) / 2
+        num_combos_y = gen_num * (gen_num - 1) / 2
+        mmd = (np.sum(K_xx_upper) / num_combos_x +
+               np.sum(K_yy_upper) / num_combos_y -
+               2 * np.sum(K_xy) / (batch_size * gen_num))
+        return mmd
 
 
 # Build model.
@@ -173,19 +260,23 @@ ae_loss = tf.reduce_mean(tf.square(ae_x - x))
 # SET UP MMD LOSS.
 mmd = compute_mmd(enc_x, enc_g)
 
-d_loss = ae_loss - 2.0 * mmd
+d_loss = ae_loss - lambda_mmd * mmd
 g_loss = mmd
 
 if optimizer == 'adagrad':
+    ae_opt = tf.train.AdagradOptimizer(learning_rate)
     d_opt = tf.train.AdagradOptimizer(learning_rate)
     g_opt = tf.train.AdagradOptimizer(learning_rate)
 elif optimizer == 'adam':
+    ae_opt = tf.train.AdamOptimizer(learning_rate)
     d_opt = tf.train.AdamOptimizer(learning_rate)
     g_opt = tf.train.AdamOptimizer(learning_rate)
 elif optimizer == 'rmsprop':
+    ae_opt = tf.train.RMSPropOptimizer(learning_rate)
     d_opt = tf.train.RMSPropOptimizer(learning_rate)
     g_opt = tf.train.RMSPropOptimizer(learning_rate)
 else:
+    ae_opt = tf.train.GradientDescentOptimizer(learning_rate)
     d_opt = tf.train.GradientDescentOptimizer(learning_rate)
     g_opt = tf.train.GradientDescentOptimizer(learning_rate)
 
@@ -199,6 +290,7 @@ enc_grads_clipped_ = tuple(
 d_grads_ = enc_grads_clipped_ + dec_grads_
 d_vars_ = enc_vars_ + dec_vars_
 d_optim = d_opt.apply_gradients(zip(d_grads_, d_vars_))
+ae_optim = ae_opt.minimize(ae_loss, var_list=d_vars_)
 g_optim = g_opt.minimize(g_loss, var_list=g_vars)
 
 # Train.
@@ -212,14 +304,21 @@ g_out_file = os.path.join(log_dir, 'g_out.txt')
 if os.path.isfile(g_out_file):
     os.remove(g_out_file)
 start_time = time()
+pretrain_steps = 0
 for step in range(max_step):
     random_batch_data = np.array(
         [data[d] for d in np.random.choice(len(data), batch_size)])
     random_batch_z = get_random_z(gen_num, z_dim)
-    sess.run([d_optim, g_optim],
-             feed_dict={
-                 z: random_batch_z,
-                 x: random_batch_data})
+    if step < pretrain_steps:
+        sess.run([ae_optim],
+                 feed_dict={
+                     z: random_batch_z,
+                     x: random_batch_data})
+    else:
+        sess.run([d_optim, g_optim],
+                 feed_dict={
+                     z: random_batch_z,
+                     x: random_batch_data})
 
     # Occasionally log/plot results.
     if step % log_step == 0:
@@ -228,12 +327,28 @@ for step in range(max_step):
             [d_loss, ae_loss, mmd, g], feed_dict={
                 z: random_batch_z,
                 x: random_batch_data})
-        print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, mmd = {:.4f}'.format(
-            step, d_loss_, ae_loss_, mmd_))
+        print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, '
+            'L * mmd = {:.4f}'.format(step, d_loss_, ae_loss_,
+                lambda_mmd * mmd_))
+
+        # Print average of marginal MMD(data_i, gen_i).
+        if data_file:
+            marginal_mmds = np.zeros((num_cols, num_cols))
+            for i in range(num_cols):
+                for j in range(i, num_cols):
+                    marginal_mmds[i][j] = compute_mmd(
+                        data[:, i], g_out[:, j], use_tf=False)
+            print(np.round(marginal_mmds, 2))
+            print
+
+
+
+        
 
         # Make scatter plots.
         if out_dim > 2:
-            indices_to_plot = [0, 1, 2]
+            MAX_TO_PLOT = 5
+            indices_to_plot = np.arange(min(MAX_TO_PLOT, out_dim))
         elif out_dim == 2:
             indices_to_plot = range(out_dim)
             fig, ax = plt.subplots()
@@ -254,7 +369,7 @@ for step in range(max_step):
         pairplot_simulation.savefig('pairplot_simulation.png')
         plt.close('all')
         
-        # Save generated data to file.
+        # Save generated data to NumPy file and to output collection.
         np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
         with open(g_out_file, 'a') as f:
             f.write(str(g_out) + '\n')
