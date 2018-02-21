@@ -5,13 +5,31 @@ from multivariate_mmd_gan import build_model, load_checkpoint
 from weighting import get_estimation_points 
 
 
-# Within scope of code, need to set up data and TF session.
+"""This script sets up a sampler for a pre-trained GAN simulator.
+
+This script provides a helper function to sample from a GAN simulator. It has
+a one-time setup function called 'set_up_tf_model_once()', which builds the
+pre-trained model locally, and outputs 'tf_setup'. The output 'tf_setup'
+contains a handful of useful graph values, which are used in another function
+called 'generate_points()'.
+
+The function 'generate_points()' is the desired, resusable sampling function.
+It, and takes 'tf_setup' and a 'mode' as input. The mode selects whether
+weights are computed over support points, or over the coreset. Outputs are:
+support points, a coreset, weights for the generated points, and weights for
+the data.
+"""
+
+
+# SETUP, Part 1 of 2: One-time setup, done before sampling.
 def set_up_tf_model_once():
+    # Adjustable parameters.
     data_file = '/home/maurice/mmd/multivariate/gp/gp_data.txt'
     checkpoint_dir = '/home/maurice/mmd/multivariate/gp/logs_test/checkpoints'
-    batch_size = 200
-    gen_num = 200
-    z_dim = 3
+    gen_num = 10
+    # Non-adjustable params related to the built model.
+    batch_size = 100  # Required for build_model(), but not relevant when sampling.
+    z_dim = 3  # Autoencoder dim. Not adjustable once model is trained.
     # Load data.
     data = np.loadtxt(open(data_file, 'rb'), delimiter=' ')
     data_num = data.shape[0]
@@ -39,11 +57,12 @@ def set_up_tf_model_once():
     return tf_setup 
 
 
-# Store values from one-time setup.
+# SETUP, Part 2 of 2: Store values from one-time setup.
 tf_setup = set_up_tf_model_once()
 
 
-# After one-time setup, this function calls samples.
+# SAMPLER: This function can be used repeatedly to call samples. The tf_setup
+#   must be within the same scope. Mode can be in ['coreset', 'support'].
 def generate_points(tf_setup=tf_setup, mode='coreset'):
     data = tf_setup[0] 
     batch_size = tf_setup[1] 
@@ -64,20 +83,16 @@ def generate_points(tf_setup=tf_setup, mode='coreset'):
                 z: random_batch_z})
 
     support_points, coreset, weights_estimation_pts, weights_data = \
-        get_estimation_points(mode=mode, support_points=g_out, email=False)
+        get_estimation_points(mode=mode, support_points=g_out, email=True)
     return support_points, coreset, weights_estimation_pts, weights_data
 
 test = 1
 if test:
-    results = generate_points() 
+    results = generate_points(mode='coreset') 
     support_points, coreset, weights_estimation_pts, weights_data = results
     for r in results:
         print r.shape
-
-    results = generate_points() 
+    results = generate_points(mode='support') 
     support_points, coreset, weights_estimation_pts, weights_data = results
     for r in results:
         print r.shape
-
-
-

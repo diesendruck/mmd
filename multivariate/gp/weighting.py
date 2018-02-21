@@ -98,7 +98,7 @@ def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
                       ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
         else:
             os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
-                      '-a "plots/plot_data_support.png" -a '
+                      '-a "plots/plot_data_support.png" '
                       '-a "plots/weights_data.png"'
                       ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
         print('Emailed results to momod@utexas.edu.')
