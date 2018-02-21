@@ -23,7 +23,7 @@ def nearest(target, arr):
 
 
 def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
-        mode='coreset', support_points=None):
+        mode='coreset', support_points=None, email=False):
     # Load data and support points.
     data = np.loadtxt(open(data_file, 'rb'), delimiter=' ')
     if support_points is None:
@@ -91,16 +91,17 @@ def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
     plt.savefig('plots/weights_data.png')
     plt.close('all')
 
-    if mode == 'coreset':
-        os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
-                  '-a "plots/plot_data_support_subset.png" -a "plots/weights_data.png"'
-                  ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
-    else:
-        os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
-                  '-a "plots/plot_data_support.png" -a '
-                  '-a "plots/weights_data.png"'
-                  ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
-    print('Emailed results to momod@utexas.edu.')
+    if email:
+        if mode == 'coreset':
+            os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
+                      '-a "plots/plot_data_support_subset.png" -a "plots/weights_data.png"'
+                      ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
+        else:
+            os.system('echo $PWD{} | mutt momod@utexas.edu -s "gp_data" -a "gp_data.txt" '
+                      '-a "plots/plot_data_support.png" -a '
+                      '-a "plots/weights_data.png"'
+                      ' -a "plots/weights_estimation_pts.png"'.format('  mode: '+str(mode)))
+        print('Emailed results to momod@utexas.edu.')
 
     return support_points, subset, weights_estimation_pts, weights_data 
 

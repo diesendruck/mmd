@@ -208,8 +208,12 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
 
     g, g_vars = generator(
         z, width=width, depth=depth, activation=activation, out_dim=out_dim)
+    g_read_only, _ = generator(
+        z, width=width, depth=depth, activation=activation, out_dim=out_dim,
+        reuse=True)
     h_out, ae_out, enc_vars, dec_vars = autoencoder(tf.concat([x, g], 0),
-        width=width, depth=depth, activation=activation, z_dim=z_dim, reuse=False)
+        width=width, depth=depth, activation=activation, z_dim=z_dim,
+        reuse=False)
     enc_x, enc_g = tf.split(h_out, [batch_size, gen_num])
     ae_x, ae_g = tf.split(ae_out, [batch_size, gen_num])
 
@@ -246,10 +250,10 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
     d_vars_ = enc_vars_ + dec_vars_
     d_optim = d_opt.apply_gradients(zip(d_grads_, d_vars_))
     g_optim = g_opt.minimize(g_loss, var_list=g_vars)
-    return x, z, g, ae_loss, d_loss, mmd, d_optim, g_optim
+    return x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim
 
 
-def get_sample(gen_num=200, tag='test'):
+def get_sample(gen_num=200, tag='test', checkpoint_dir=None):
     """Separate callable fn to sample, given gen_num and checkpoint_dir.
     """
     # Set up config.
@@ -269,8 +273,9 @@ def get_sample(gen_num=200, tag='test'):
 
     # Set up data, dirs, and model.
     data, data_num, out_dim = load_data(data_num)
-    log_dir, checkpoint_dir = prepare_dirs()
-    x, z, g, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
+    if checkpoint_dir is None:
+        _, checkpoint_dir = prepare_dirs()
+    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
         batch_size, gen_num, out_dim, z_dim)
     init_op = tf.global_variables_initializer()
     saver = tf.train.Saver()
@@ -284,16 +289,19 @@ def get_sample(gen_num=200, tag='test'):
         saver, sess, checkpoint_dir)
     if could_load:
         load_step = checkpoint_counter
-        print(" [*] Load SUCCESS")
+        print(' [*] Load SUCCESS, checkpoint {}'.format(load_step))
     else:
-        print(" [!] Load failed...")
+        print(' [!] Load failed...')
     random_batch_data = np.array(
         [data[d] for d in np.random.choice(len(data), batch_size)])
     random_batch_z = get_random_z(gen_num, z_dim)
-    g_out = sess.run(g,
+    g_out = sess.run(g_read_only,
         feed_dict={
             z: random_batch_z,
             x: random_batch_data})
+    print(g_out)
+
+    sess.close()
     return g_out
 
 
@@ -312,12 +320,11 @@ def main():
     data_file = args.data_file
     tag = args.tag
     load_existing = args.load_existing
-    get_sample = args.get_sample
     activation = tf.nn.elu
 
     data, data_num, out_dim = load_data(data_num)
     log_dir, checkpoint_dir = prepare_dirs()
-    x, z, g, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
+    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
         batch_size, gen_num, out_dim, z_dim)
     init_op = tf.global_variables_initializer()
     saver = tf.train.Saver()
