@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pdb
+import sys
 import tensorflow as tf
 layers = tf.layers
 import pandas as pd
@@ -16,17 +17,17 @@ from scipy.stats import scoreatpercentile
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--batch_size', type=int, default=500)
 parser.add_argument('--gen_num', type=int, default=200)
 parser.add_argument('--z_dim', type=int, default=16)
-parser.add_argument('--width', type=int, default=100,
+parser.add_argument('--width', type=int, default=256,
     help='width of generator layers')
 parser.add_argument('--depth', type=int, default=3, 
     help='num of generator layers')
-parser.add_argument('--lambda_mmd', type=float, default=1e-3)
+parser.add_argument('--lambda_mmd', type=float, default=1e-4)
 parser.add_argument('--log_step', type=int, default=2000)
 parser.add_argument('--max_step', type=int, default=500000)
-parser.add_argument('--learning_rate', type=float, default=1e-3)
+parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
 parser.add_argument('--data_file', type=str, default=None)
@@ -58,7 +59,8 @@ def fivenum(v):
     iqd = q3-q1
     md = np.median(v)
     whisker = 1.5*iqd
-    return np.min(v), md-whisker, md, md+whisker, np.max(v)
+    #return np.min(v), md-whisker, md, md+whisker, np.max(v)
+    return np.min(v), q1, md, q3, np.max(v)
 
 
 def build_toy_data():
@@ -87,27 +89,57 @@ def build_toy_data():
     #data = np.concatenate((cluster1, cluster2))
 
 
-# Load data.
+def plot_summary_raw_data(raw_data):
+    num_cols = raw_data.shape[1]
+    sq_dim = int(np.ceil(np.sqrt(num_cols)))
+    fig, axs = plt.subplots(sq_dim, sq_dim, figsize=(10,10))
+    fig.subplots_adjust(hspace=0.5, wspace=0.5)
+    axs = axs.ravel()
+    for i in range(num_cols):
+        axs[i].hist(raw_data[:, i])
+    plt.savefig('plot_raw_data_marginals.png')
+    plt.close('all')
+
+
+# load_data().
 if data_file:
-    data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
-    num_cols = 5
-    #data = data[:, :num_cols]  # Just the first X cols.
+    raw_data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    num_cols = raw_data.shape[1]
+    plot_summary_raw_data(raw_data)
+    norm_data = 1
+
     print('\nRaw data:')
-    for i in range(data.shape[1]):
+    for i in range(num_cols):
         print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
-            *fivenum(data[:,i])))
-    print('\nNormed data:')
-    data = (data - data.mean(0))/data.std(0)
-    for i in range(data.shape[1]):
-        print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
-            *fivenum(data[:,i])))
+            *fivenum(raw_data[:,i])))
+    if norm_data:
+        print('\nNormed data:')
+        # Don't normalize binary vars.
+        mean_mask = [1] * 17 + [0, 0]
+        std_mask = [1] * 19
+        mean_vec = raw_data.mean(0) * mean_mask
+        std_vec = raw_data.std(0) * std_mask
+        # Regularly normalize the rest.
+        #data = (raw_data - raw_data.mean(0)) / raw_data.std(0)
+        data = (raw_data - mean_vec) / std_vec 
+        for i in range(data.shape[1]):
+            print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
+                *fivenum(data[:,i])))
+
+    # Optionally exclude some columns.
+    excluded_cols = []
+    cols_to_use = [c for c in range(num_cols) if c not in excluded_cols]
+    do_subset_data = 1
+    if do_subset_data:
+        data = data[:, cols_to_use]
+
     data_num = len(data)
     out_dim = data.shape[1]
 else:
     data = build_toy_data()
     data = (data - data.mean(0))/data.std(0)
+    cols_to_use = np.arange(data.shape[1])
     out_dim = data.shape[1]
-
 
 # Set save tag, as a function of config parameters.
 save_tag = 'dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
@@ -116,8 +148,11 @@ save_tag = 'dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
 
 # Set up log dir.
 log_dir = 'logs'
+checkpoint_dir = 'logs/checkpoints'
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
+if not os.path.exists(checkpoint_dir):
+    os.makedirs(checkpoint_dir)
 
 
 def get_random_z(gen_num, z_dim):
@@ -193,6 +228,10 @@ def discriminator(x, width=3, depth=3, activation=tf.nn.elu, out_dim=1,
 
 def compute_mmd(enc_x, enc_g, use_tf=True):
     """Computes mmd between two inputs of size [batch_size, ...]."""
+    #sigma_list = [1, 4, 16, 64, 256]
+    sigma_list = [1.0, 4.0, 16.0, 64.0, 128.0]
+    sigma_list = [0.1, 0.5, 1.0]
+
     if use_tf:
         v = tf.concat([enc_x, enc_g], 0)
         VVT = tf.matmul(v, tf.transpose(v))
@@ -200,8 +239,6 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
         exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
         K = 0.0
-        #sigma_list = [1, 4, 16, 64, 256]
-        sigma_list = [0.1, 0.5, 1.0]
         for sigma in sigma_list:
             gamma = 1.0 / (2.0 * sigma**2)
             K += tf.exp(-gamma * exp_object)
@@ -215,7 +252,7 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
                tf.reduce_sum(K_yy_upper) / num_combos_y -
                2 * tf.reduce_sum(K_xy) / (batch_size * gen_num))
-        return mmd
+        return mmd, exp_object
     else:
         if len(enc_x.shape) == 1:
             enc_x = np.reshape(enc_x, [-1, 1])
@@ -226,8 +263,6 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         sqs_tiled_horiz = np.tile(sqs, np.transpose(sqs).shape)
         exp_object = sqs_tiled_horiz - 2 * VVT + np.transpose(sqs_tiled_horiz)
         K = 0.0
-        #sigma_list = [1, 4, 16, 64, 256]
-        sigma_list = [0.1, 0.5, 1.0]
         for sigma in sigma_list:
             gamma = 1.0 / (2.0 * sigma**2)
             K += np.exp(-gamma * exp_object)
@@ -241,7 +276,7 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         mmd = (np.sum(K_xx_upper) / num_combos_x +
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (batch_size * gen_num))
-        return mmd
+        return mmd, exp_object
 
 
 # Build model.
@@ -258,7 +293,7 @@ ae_x, ae_g = tf.split(ae_out, [batch_size, gen_num])
 ae_loss = tf.reduce_mean(tf.square(ae_x - x))
 
 # SET UP MMD LOSS.
-mmd = compute_mmd(enc_x, enc_g)
+mmd, exp_object = compute_mmd(enc_x, enc_g)
 
 d_loss = ae_loss - lambda_mmd * mmd
 g_loss = mmd
@@ -293,11 +328,35 @@ d_optim = d_opt.apply_gradients(zip(d_grads_, d_vars_))
 ae_optim = ae_opt.minimize(ae_loss, var_list=d_vars_)
 g_optim = g_opt.minimize(g_loss, var_list=g_vars)
 
-# Train.
+
+summary_op = tf.summary.merge([
+    tf.summary.scalar("loss/d_loss", d_loss),
+    tf.summary.scalar("loss/ae_loss", ae_loss),
+    tf.summary.scalar("loss/mmd", mmd),
+])
+
+# train().
 init_op = tf.global_variables_initializer()
+saver = tf.train.Saver()
+summary_writer = tf.summary.FileWriter(checkpoint_dir)
+step = tf.Variable(0, name='step', trainable=False)
 gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
 sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
+sv = tf.train.Supervisor(logdir=checkpoint_dir,
+                        is_chief=True,
+                        saver=saver,
+                        summary_op=None,
+                        summary_writer=summary_writer,
+                        save_model_secs=300,
+                        global_step=step,
+                        ready_for_local_init_op=None)
 sess = tf.Session(config=sess_config)
+#global_step = tf.train.get_or_create_global_step()
+#sess = tf.train.MonitoredTrainingSession(
+#    config=sess_config,
+#    checkpoint_dir=checkpoint_dir,
+#    hooks=[tf.train.StepCounterHook])
+
 sess.run(init_op)
 print save_tag
 g_out_file = os.path.join(log_dir, 'g_out.txt')
@@ -322,66 +381,126 @@ for step in range(max_step):
 
     # Occasionally log/plot results.
     if step % log_step == 0:
+        saver.save(sess, os.path.join(checkpoint_dir, 'test'),
+            global_step=step)
+        summary_ = sess.run(summary_op,
+            feed_dict={
+                z: random_batch_z,
+                x: random_batch_data})
+        summary_writer.add_summary(summary_, step)
+        summary_writer.flush()
+
+        #enc_x_, enc_g_, exp_object_, mmd_ = sess.run(
+        #    [enc_x, enc_g, exp_object, mmd],
+        #        feed_dict={
+        #            z: random_batch_z,
+        #            x: random_batch_data})
+        #print(np.exp(-0.5 * exp_object_))
+        #pdb.set_trace()
+
         # Print some loss values.
-        d_loss_, ae_loss_, mmd_, g_out = sess.run(
+        d_loss_, ae_loss_, mmd_, g_ = sess.run(
             [d_loss, ae_loss, mmd, g], feed_dict={
                 z: random_batch_z,
                 x: random_batch_data})
         print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, '
-            'L * mmd = {:.4f}'.format(step, d_loss_, ae_loss_,
-                lambda_mmd * mmd_))
+            'L * mmd = {:.4f}, mmd = {:.4f}'.format(step, d_loss_, ae_loss_,
+                lambda_mmd * mmd_, mmd_))
 
         # Print average of marginal MMD(data_i, gen_i).
+        '''
         if data_file:
+            #num_marginals = len(cols_to_use)
             marginal_mmds = np.zeros((num_cols, num_cols))
-            for i in range(num_cols):
-                for j in range(i, num_cols):
-                    marginal_mmds[i][j] = compute_mmd(
-                        data[:, i], g_out[:, j], use_tf=False)
+            for ind_i, i in enumerate(cols_to_use):
+                for ind_j, j in enumerate(cols_to_use):
+                    if j >= i:
+                        mmd_ij_data = compute_mmd(
+                            random_batch_data[:, ind_i], 
+                            random_batch_data[:, ind_j], use_tf=False) 
+                        mmd_ij_gen = compute_mmd(
+                            g_[:, ind_i], g_[:, ind_j], use_tf=False) 
+                        marginal_mmds[i][j] = mmd_ij_gen - mmd_ij_data
+
+                        #marginal_mmds[i][j] = compute_mmd(
+                        #    random_batch_data[:, i], g_[:, j], use_tf=False)
             print(np.round(marginal_mmds, 2))
             print
+        '''
 
-
-
-        
-
-        # Make scatter plots.
-        if out_dim > 2:
-            MAX_TO_PLOT = 5
-            indices_to_plot = np.arange(min(MAX_TO_PLOT, out_dim))
-        elif out_dim == 2:
-            indices_to_plot = range(out_dim)
-            fig, ax = plt.subplots()
-            ax.scatter(*zip(*data), color='gray', alpha=0.05)
-            ax.scatter(*zip(*g_out), color='green', alpha=0.3)
-            plt.savefig(os.path.join(
-                log_dir, 'scatter_{}_i{}.png'.format(save_tag, step)))
-            plt.close(fig)
-        else:
-            indices_to_plot = range(out_dim)
-
-        # Make pair plots.
-        pairplot_data = sb.pairplot(
-            pd.DataFrame(random_batch_data[:, indices_to_plot]))
-        pairplot_data.savefig('pairplot_data.png')
-        pairplot_simulation = sb.pairplot(
-            pd.DataFrame(g_out[:, indices_to_plot]))
-        pairplot_simulation.savefig('pairplot_simulation.png')
-        plt.close('all')
-        
         # Save generated data to NumPy file and to output collection.
+        g_out = (g_ * std_vec[cols_to_use] + mean_vec[cols_to_use])
+        # Round values in binary cols.
+        for i, row in enumerate(g_out):
+            if row[17] < 0.5:
+                row[17] = 0.0
+            else:
+                row[17] = 1.0
+            if row[18] < 0.5:
+                row[18] = 0.0
+            else:
+                row[18] = 1.0
+            g_out[i] = row
         np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
+        np.savetxt(os.path.join(log_dir, 'g_out.csv'), g_out, delimiter=',')
         with open(g_out_file, 'a') as f:
             f.write(str(g_out) + '\n')
 
         # Print time performance.
-        if step % 10 * log_step > 0:
+        if step % log_step == 0:
             elapsed_time = time() - start_time
             time_per_iter = elapsed_time / step
             total_est = elapsed_time / step * max_step
             m, s = divmod(total_est, 60)
             h, m = divmod(m, 60)
             total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-            print ('  time (s): {:.2f}, time/iter: {:.4f},'
-                    ' Total est.: {:.4f}').format(step, elapsed_time, time_per_iter,
-                                             total_est_str)
+            print(('  time (s): {:.2f}, time/iter: {:.4f},'
+                   ' Total est.: {}').format(
+                       elapsed_time, time_per_iter, total_est_str))
+
+        # PLOTTING RESULTS.
+        plot = 1
+        if plot:
+            # Make scatter plots.
+            '''
+            if out_dim > 2:
+                MAX_TO_PLOT = 5
+                indices_to_plot = np.arange(min(MAX_TO_PLOT, out_dim))
+                indices_to_plot = [11, 12, 13, 14, 15]
+            elif out_dim == 2:
+                indices_to_plot = range(out_dim)
+                fig, ax = plt.subplots()
+                ax.scatter(*zip(*data), color='gray', alpha=0.05)
+                ax.scatter(*zip(*g_out), color='green', alpha=0.3)
+                plt.savefig(os.path.join(
+                    log_dir, 'scatter_{}_i{}.png'.format(save_tag, step)))
+                plt.close(fig)
+            else:
+                indices_to_plot = range(out_dim)
+
+            # Make pair plots.
+            pairplot_data = sb.pairplot(
+                pd.DataFrame(random_batch_data[:, indices_to_plot]))
+            plt.title('Marginals: {}'.format(indices_to_plot))
+            pairplot_data.savefig('pairplot_data.png')
+            pairplot_simulation = sb.pairplot(
+                pd.DataFrame(g_out[:, indices_to_plot]))
+            pairplot_simulation.savefig('pairplot_simulation.png')
+            plt.close('all')
+            '''
+            num_cols = raw_data.shape[1]
+            sq_dim = int(np.ceil(np.sqrt(num_cols)))
+            fig, axs = plt.subplots(4, 5, figsize=(20, 16))
+            fig.subplots_adjust(hspace=0.5, wspace=0.5)
+            fig.suptitle('Marginals, it{}'.format(step))
+            axs = axs.ravel()
+            for ind_i, i in enumerate(cols_to_use):
+                mmd_i_data_gen, _ = compute_mmd(
+                    random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
+                axs[i].hist(raw_data[:, ind_i], normed=True, alpha=0.3, label='d')
+                axs[i].hist(g_out[:, ind_i], normed=True, alpha=0.3, label='g')
+                axs[i].set_xlabel('mmd = {:.3f}'.format(mmd_i_data_gen))
+                axs[i].legend()
+            #fig.tight_layout()
+            plt.savefig('plot_marginals.png')
+            plt.close('all')
