@@ -9,16 +9,20 @@ from numpy.linalg import norm
 from scipy.spatial.distance import pdist
 
 
-def nearest(target, arr):
+def nearest(target, arr, keep=None):
+    # Apply default (non-mask), if no keep array is supplied.
+    if keep is None:
+        keep = np.ones(len(arr), dtype=bool)
     nearest_dist = 1e10
     nearest_neighbor = [0, 0]
     nearest_index = 0
     for index, candidate in enumerate(arr):
-        dist = norm(target - candidate)
-        if dist < nearest_dist:
-            nearest_dist = dist
-            nearest_neighbor = candidate 
-            nearest_index = index
+        if keep[index]:
+            dist = norm(target - candidate)
+            if dist < nearest_dist:
+                nearest_dist = dist
+                nearest_neighbor = candidate 
+                nearest_index = index
     return nearest_dist, np.array(nearest_neighbor), nearest_index
 
 
@@ -34,9 +38,12 @@ def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
     # Get datapoints (the subset) closest to support points.
     if mode == 'coreset':
         subset = np.zeros(support_points.shape)
+        # Avoid snapping to duplicate data points, using mask.
+        keep = np.ones(len(data), dtype=bool)
         for index, sp in enumerate(support_points):
-            _, nearest_neighbor, _ = nearest(sp, data)
+            _, nearest_neighbor, nearest_index = nearest(sp, data, keep=keep)
             subset[index] = nearest_neighbor
+            keep[nearest_index] = False 
         np.save(os.path.join(log_dir, 'subset.npy'), subset)
     else:
         subset = support_points
