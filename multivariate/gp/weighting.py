@@ -38,7 +38,7 @@ def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
     # Get datapoints (the subset) closest to support points.
     if mode == 'coreset':
         subset = np.zeros(support_points.shape)
-        # Avoid snapping to duplicate data points, using mask.
+        # Ensure unique points for coreset, using mask.
         keep = np.ones(len(data), dtype=bool)
         for index, sp in enumerate(support_points):
             _, nearest_neighbor, nearest_index = nearest(sp, data, keep=keep)
