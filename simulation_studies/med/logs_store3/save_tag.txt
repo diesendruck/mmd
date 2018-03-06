@@ -1,0 +1,1 @@
+test_dn85021_bs1000_gen1000_zd64_w100_d3_lr0.001_op_rmsprop_lbmmd0.1
