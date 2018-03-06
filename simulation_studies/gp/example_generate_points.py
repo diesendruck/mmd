@@ -1,3 +1,4 @@
+import os
 import pdb
 import numpy as np
 import tensorflow as tf
@@ -23,20 +24,24 @@ the data.
 
 # SETUP, Part 1 of 2: One-time setup, done before sampling.
 def set_up_tf_model_once():
-    # Adjustable parameters.
-    data_file = '/home/maurice/mmd/multivariate/gp/gp_data.txt'
-    checkpoint_dir = '/home/maurice/mmd/multivariate/gp/logs_test/checkpoints'
-    gen_num = 10
-    # Non-adjustable params related to the built model.
-    batch_size = 100  # Required for build_model(), but not relevant when sampling.
-    z_dim = 3  # Autoencoder dim. Not adjustable once model is trained.
+    # Parameters.
+    data_file = '/home/maurice/mmd/simulation_studies/gp/gp_data.txt'
+    log_dir = '/home/maurice/mmd/simulation_studies/gp/logs_store2'
+    checkpoint_dir = os.path.join(log_dir, 'checkpoints')
+    gen_num = 800 
+    z_dim = 10  # Once trained, do not adjust.
+    print('NOTE: Using z_dim={}'.format(z_dim))
+    batch_size = 100  # Value required, but irrelevant for sampling.
+
     # Load data.
     data = np.loadtxt(open(data_file, 'rb'), delimiter=' ')
     data_num = data.shape[0]
     out_dim = data.shape[1]
+
     # Build model.
     x, z, _, g_read_only, _, _, _, _, _ = build_model(
         batch_size, gen_num, out_dim, z_dim)
+
     # Initialize TF session.
     init_op = tf.global_variables_initializer() 
     saver = tf.train.Saver()
@@ -44,6 +49,7 @@ def set_up_tf_model_once():
     sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
     sess = tf.Session(config=sess_config)
     sess.run(init_op)
+
     # Load existing checkpoint.
     could_load, checkpoint_counter = load_checkpoint(
         saver, sess, checkpoint_dir)
@@ -53,7 +59,7 @@ def set_up_tf_model_once():
     else:
         print(' [!] Load failed...') 
     # Package output for reading graph in generate_points().
-    tf_setup = [data, batch_size, gen_num, z_dim, sess, x, z, g_read_only]
+    tf_setup = [data, batch_size, gen_num, z_dim, sess, x, z, g_read_only, log_dir]
     return tf_setup 
 
 
@@ -72,18 +78,19 @@ def generate_points(tf_setup=tf_setup, mode='coreset'):
     x = tf_setup[5] 
     z = tf_setup[6] 
     g_read_only = tf_setup[7] 
+    log_dir = tf_setup[8] 
 
     random_batch_data = np.array(
             [data[d] for d in np.random.choice(len(data), batch_size)])
-    random_batch_z = np.random.uniform(size=[gen_num, z_dim],low=-1.0, high=1.0) 
-    #random_batch_z = np.random.normal(size=[gen_num, z_dim]) 
+    #random_batch_z = np.random.uniform(size=[gen_num, z_dim],low=-1.0, high=1.0) 
+    random_batch_z = np.random.normal(size=[gen_num, z_dim]) 
     g_out = sess.run(g_read_only, 
             feed_dict={ 
                 x: random_batch_data,
                 z: random_batch_z})
 
     support_points, coreset, weights_estimation_pts, weights_data = \
-        get_estimation_points(mode=mode, support_points=g_out)
+        get_estimation_points(log_dir=log_dir, mode=mode, support_points=g_out)
     return support_points, coreset, weights_estimation_pts, weights_data
 
 test = 1

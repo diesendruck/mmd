@@ -79,23 +79,24 @@ def get_estimation_points(data_file='gp_data.txt', log_dir='logs_test',
         ax.scatter(*zip(*support_points), color='green', alpha=0.3, label='support')
         ax.scatter(*zip(*subset), color='red', alpha=0.3, label='subset',
             s=75*weights_estimation_pts)
+        ax.set_title('n={}'.format(len(support_points)))
         ax.legend()
-        plt.savefig('plots/plot_data_support_subset.png')
+        plt.savefig(os.path.join(log_dir, 'plots', 'plot_data_support_subset.png'))
     else:
         ax.scatter(*zip(*support_points), color='green', alpha=0.3, label='support',
             s=75*weights_estimation_pts)
         ax.legend()
-        plt.savefig('plots/plot_data_support.png')
+        plt.savefig(os.path.join(log_dir, 'plots', 'plot_data_support.png'))
 
     fig, ax = plt.subplots()
     ax.plot(weights_estimation_pts, color='gray', label='weights_estimation_pts')
     ax.legend()
-    plt.savefig('plots/weights_estimation_pts.png')
+    plt.savefig(os.path.join(log_dir, 'plots', 'weights_estimation_pts.png'))
 
     fig, ax = plt.subplots()
     ax.plot(weights_data, color='gray', label='weights_data')
     ax.legend()
-    plt.savefig('plots/weights_data.png')
+    plt.savefig(os.path.join(log_dir, 'plots', 'weights_data.png'))
     plt.close('all')
 
     if email:

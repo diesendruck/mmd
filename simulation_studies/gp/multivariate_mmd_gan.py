@@ -15,28 +15,29 @@ import pandas as pd
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
-parser.add_argument('--batch_size', type=int, default=200)
-parser.add_argument('--gen_num', type=int, default=200)
-parser.add_argument('--z_dim', type=int, default=3)
-parser.add_argument('--width', type=int, default=10,
+parser.add_argument('--batch_size', type=int, default=800)
+parser.add_argument('--gen_num', type=int, default=800)
+parser.add_argument('--width', type=int, default=20,
                     help='width of generator layers')
-parser.add_argument('--depth', type=int, default=20,
+parser.add_argument('--depth', type=int, default=10,
                     help='num of generator layers')
+parser.add_argument('--z_dim', type=int, default=10)
 parser.add_argument('--log_step', type=int, default=1000)
-parser.add_argument('--max_step', type=int, default=10000)
+parser.add_argument('--max_step', type=int, default=200000)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
-parser.add_argument('--data_file', type=str, default=None)
+parser.add_argument('--data_file', type=str, default='gp_data.txt')
 parser.add_argument('--tag', type=str, default='test')
-parser.add_argument('--load_existing', default=False, action='store_true', dest='load_existing')
+parser.add_argument('--load_existing', default=False, action='store_true',
+                    dest='load_existing')
 args = parser.parse_args()
 data_num = args.data_num
 batch_size = args.batch_size
 gen_num = args.gen_num
-z_dim = args.z_dim
 width = args.width
 depth = args.depth
+z_dim = args.z_dim
 log_step = args.log_step
 max_step = args.max_step
 learning_rate = args.learning_rate
@@ -49,8 +50,9 @@ activation = tf.nn.elu
 
 def get_random_z(gen_num, z_dim):
     """Generates 2d array of noise input data."""
-    return np.random.uniform(size=[gen_num, z_dim],
-                             low=-1.0, high=1.0)
+    #return np.random.uniform(size=[gen_num, z_dim],
+    #                         low=-1.0, high=1.0)
+    return np.random.normal(size=[gen_num, z_dim])
 
 
 def dense(x, width, activation, batch_residual=False):
@@ -160,12 +162,14 @@ def compute_mmd(enc_x, enc_g):
 def load_checkpoint(saver, sess, checkpoint_dir):
     import re
     print(" [*] Reading checkpoints...")
+    print("     {}".format(checkpoint_dir))
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and ckpt.model_checkpoint_path:
         ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
         saver.restore(sess, os.path.join(checkpoint_dir, ckpt_name))
         #counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
-        counter = int(''.join([i for i in ckpt_name if i.isdigit()]))
+        #counter = int(''.join([i for i in ckpt_name if i.isdigit()]))
+        counter = int(ckpt_name.split('-')[-1])
         print(" [*] Success to read {}".format(ckpt_name))
         return True, counter
     else:
@@ -195,11 +199,14 @@ def load_data(data_num):
 def prepare_dirs():
     log_dir = 'logs_{}'.format(tag)
     checkpoint_dir = os.path.join(log_dir, 'checkpoints')
+    plot_dir = os.path.join(log_dir, 'plots')
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
-    return log_dir, checkpoint_dir
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    return log_dir, checkpoint_dir, plot_dir
 
 
 def build_model(batch_size, gen_num, out_dim, z_dim):
@@ -253,66 +260,67 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
     return x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim
 
 
-def get_sample(gen_num=200, tag='test', checkpoint_dir=None):
-    """Separate callable fn to sample, given gen_num and checkpoint_dir.
-    """
-    # Set up config.
-    args = parser.parse_args()
-    data_num = args.data_num
-    batch_size = args.batch_size
-    z_dim = args.z_dim
-    width = args.width
-    depth = args.depth
-    log_step = args.log_step
-    max_step = args.max_step
-    learning_rate = args.learning_rate
-    optimizer = args.optimizer
-    data_file = args.data_file
-    activation = tf.nn.elu
-    assert gen_num <= data_num, 'gen_num must be < data_num'
-
-    # Set up data, dirs, and model.
-    data, data_num, out_dim = load_data(data_num)
-    if checkpoint_dir is None:
-        _, checkpoint_dir = prepare_dirs()
-    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
-        batch_size, gen_num, out_dim, z_dim)
-    init_op = tf.global_variables_initializer()
-    saver = tf.train.Saver()
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
-    sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
-    sess = tf.Session(config=sess_config)
-    sess.run(init_op)
-
-    # Sample from a saved model.
-    could_load, checkpoint_counter = load_checkpoint(
-        saver, sess, checkpoint_dir)
-    if could_load:
-        load_step = checkpoint_counter
-        print(' [*] Load SUCCESS, checkpoint {}'.format(load_step))
-    else:
-        print(' [!] Load failed...')
-    random_batch_data = np.array(
-        [data[d] for d in np.random.choice(len(data), batch_size)])
-    random_batch_z = get_random_z(gen_num, z_dim)
-    g_out = sess.run(g_read_only,
-        feed_dict={
-            z: random_batch_z,
-            x: random_batch_data})
-    print(g_out)
-
-    sess.close()
-    return g_out
+#def get_sample(gen_num=200, tag='test', checkpoint_dir=None):
+#    'Separate callable fn to sample, given gen_num and checkpoint_dir.' 
+#    # Set up config.
+#    args = parser.parse_args()
+#    data_num = args.data_num
+#    batch_size = args.batch_size
+#    z_dim = args.z_dim
+#    width = args.width
+#    depth = args.depth
+#    log_step = args.log_step
+#    max_step = args.max_step
+#    learning_rate = args.learning_rate
+#    optimizer = args.optimizer
+#    data_file = args.data_file
+#    activation = tf.nn.elu
+#    assert gen_num <= data_num, 'gen_num must be < data_num'
+#
+#    # Set up data, dirs, and model.
+#    data, data_num, out_dim = load_data(data_num)
+#    if checkpoint_dir is None:
+#        _, checkpoint_dir = prepare_dirs()
+#    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
+#        batch_size, gen_num, out_dim, z_dim)
+#    init_op = tf.global_variables_initializer()
+#    saver = tf.train.Saver()
+#    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
+#    sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
+#    sess = tf.Session(config=sess_config)
+#    sess.run(init_op)
+#
+#    # Sample from a saved model.
+#    could_load, checkpoint_counter = load_checkpoint(
+#        saver, sess, checkpoint_dir)
+#    if could_load:
+#        load_step = checkpoint_counter
+#        print(' [*] Load SUCCESS, checkpoint {}'.format(load_step))
+#    else:
+#        print(' [!] Load failed...')
+#    random_batch_data = np.array(
+#        [data[d] for d in np.random.choice(len(data), batch_size)])
+#    random_batch_z = get_random_z(gen_num, z_dim)
+#    g_out = sess.run(g_read_only,
+#        feed_dict={
+#            z: random_batch_z,
+#            x: random_batch_data})
+#    print(g_out)
+#
+#    sess.close()
+#    return g_out
 
 
 def main():
+    # TODO: Adjust "width" and "depth" so they don't collide with model names.
+    print('TODO: Sort why flags cause generation script to fail.')
     args = parser.parse_args()
     data_num = args.data_num
     batch_size = args.batch_size
     gen_num = args.gen_num
-    z_dim = args.z_dim
     width = args.width
     depth = args.depth
+    z_dim = args.z_dim
     log_step = args.log_step
     max_step = args.max_step
     learning_rate = args.learning_rate
@@ -323,103 +331,108 @@ def main():
     activation = tf.nn.elu
 
     data, data_num, out_dim = load_data(data_num)
-    log_dir, checkpoint_dir = prepare_dirs()
+    log_dir, checkpoint_dir, plot_dir = prepare_dirs()
     x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
         batch_size, gen_num, out_dim, z_dim)
     init_op = tf.global_variables_initializer()
     saver = tf.train.Saver()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
     sess_config = tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
-    sess = tf.Session(config=sess_config)
-    sess.run(init_op)
 
-    # Set save tag, as a function of config parameters.
-    save_tag = 'dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}'.format(
-        data_num, batch_size, gen_num, z_dim, width, depth, learning_rate,
-        optimizer)
-    print save_tag
+    with tf.Session(config=sess_config) as sess:
+        sess.run(init_op)
 
-    g_out_file = os.path.join(log_dir, 'g_out.txt')
-    if os.path.isfile(g_out_file):
-        os.remove(g_out_file)
+        # Set save tag, as a function of config parameters.
+        save_tag = 'dn{}_bs{}_gen{}_w{}_d{}_zd{}_lr{}_op_{}'.format(
+            data_num, batch_size, gen_num, width, depth, z_dim, learning_rate,
+            optimizer)
+        with open(os.path.join(log_dir, 'save_tag.txt'), 'w') as save_tag_file:
+            save_tag_file.write(save_tag)
+        print(save_tag)
 
-    # Load existing model.
-    if load_existing:
-        could_load, checkpoint_counter = load_checkpoint(
-            saver, sess, checkpoint_dir)
-        if could_load:
-            load_step = checkpoint_counter
-            print(" [*] Load SUCCESS")
-        else:
-            print(" [!] Load failed...")
-    else:
-        load_step = 0
+        g_out_file = os.path.join(log_dir, 'g_out.txt')
+        if os.path.isfile(g_out_file):
+            os.remove(g_out_file)
 
-    # MAIN RUNNING FUNCTIONS.
-    # train()
-    start_time = time()
-    for step in range(load_step, max_step):
-        random_batch_data = np.array(
-            [data[d] for d in np.random.choice(len(data), batch_size)])
-        random_batch_z = get_random_z(gen_num, z_dim)
-        sess.run([d_optim, g_optim],
-                 feed_dict={
-                     z: random_batch_z,
-                     x: random_batch_data})
-
-        # Occasionally log/plot results.
-        if step % log_step == 0:
-            # Save checkpoint.
-            saver.save(sess, os.path.join(log_dir, 'checkpoints', tag), global_step=step)
-            # Print some loss values.
-            d_loss_, ae_loss_, mmd_, g_out = sess.run(
-                [d_loss, ae_loss, mmd, g], feed_dict={
-                    z: random_batch_z,
-                    x: random_batch_data})
-            print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, mmd = {:.4f}'.format(
-                step, d_loss_, ae_loss_, mmd_))
-
-            # Make scatter plots.
-            if out_dim > 2:
-                indices_to_plot = [0, 1, 2]
-            elif out_dim == 2:
-                indices_to_plot = range(out_dim)
-                fig, ax = plt.subplots()
-                ax.scatter(*zip(*data), color='gray', alpha=0.05)
-                ax.scatter(*zip(*g_out), color='green', alpha=0.3)
-                plt.savefig(os.path.join(
-                    log_dir, 'scatter_{}_i{}.png'.format(save_tag, step)))
-                plt.close(fig)
+        # Load existing model.
+        if load_existing:
+            could_load, checkpoint_counter = load_checkpoint(
+                saver, sess, checkpoint_dir)
+            if could_load:
+                load_step = checkpoint_counter
+                print(" [*] Load SUCCESS")
             else:
-                indices_to_plot = range(out_dim)
+                print(" [!] Load failed...")
+        else:
+            load_step = 0
 
-            # Make pair plots.
-            '''
-            pairplot_data = sb.pairplot(
-                pd.DataFrame(random_batch_data[:, indices_to_plot]))
-            pairplot_data.savefig('pairplot_data.png')
-            pairplot_simulation = sb.pairplot(
-                pd.DataFrame(g_out[:, indices_to_plot]))
-            pairplot_simulation.savefig('pairplot_simulation.png')
-            plt.close('all')
-            '''
-            
-            # Save generated data to file.
-            np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
-            with open(g_out_file, 'a') as f:
-                f.write(str(g_out) + '\n')
+        # MAIN RUNNING FUNCTIONS.
+        # train()
+        start_time = time()
+        for step in range(load_step, max_step):
+            random_batch_data = np.array(
+                [data[d] for d in np.random.choice(len(data), batch_size)])
+            random_batch_z = get_random_z(gen_num, z_dim)
+            sess.run([d_optim, g_optim],
+                     feed_dict={
+                         z: random_batch_z,
+                         x: random_batch_data})
 
-            # Print time performance.
-            if step % 10 * log_step > 0:
-                elapsed_time = time() - start_time
-                time_per_iter = elapsed_time / step
-                total_est = elapsed_time / step * max_step
-                m, s = divmod(total_est, 60)
-                h, m = divmod(m, 60)
-                total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-                print ('  time (s): {:.2f}, time/iter: {:.4f},'
-                        ' Total est.: {:.4f}').format(step, elapsed_time, time_per_iter,
-                                                 total_est_str)
+            # Occasionally log/plot results.
+            if step % log_step == 0:
+                # Save checkpoint.
+                saver.save(sess, os.path.join(log_dir, 'checkpoints', tag),
+                    global_step=step)
+                # Print some loss values.
+                d_loss_, ae_loss_, mmd_, g_out = sess.run(
+                    [d_loss, ae_loss, mmd, g], feed_dict={
+                        z: random_batch_z,
+                        x: random_batch_data})
+                print(save_tag)
+                print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, mmd = {:.4f}'.format(
+                    step, d_loss_, ae_loss_, mmd_))
+
+                # Make scatter plots.
+                if out_dim > 2:
+                    indices_to_plot = [0, 1, 2]
+                elif out_dim == 2:
+                    indices_to_plot = range(out_dim)
+                    fig, ax = plt.subplots()
+                    ax.scatter(*zip(*data), color='gray', alpha=0.05)
+                    ax.scatter(*zip(*g_out), color='green', alpha=0.3)
+                    plt.savefig(os.path.join(
+                        plot_dir, 'scatter_i{}.png'.format(step)))
+                    plt.close(fig)
+                else:
+                    indices_to_plot = range(out_dim)
+
+                # Make pair plots.
+                '''
+                pairplot_data = sb.pairplot(
+                    pd.DataFrame(random_batch_data[:, indices_to_plot]))
+                pairplot_data.savefig('pairplot_data.png')
+                pairplot_simulation = sb.pairplot(
+                    pd.DataFrame(g_out[:, indices_to_plot]))
+                pairplot_simulation.savefig('pairplot_simulation.png')
+                plt.close('all')
+                '''
+                
+                # Save generated data to file.
+                np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
+                with open(g_out_file, 'a') as f:
+                    f.write(str(g_out) + '\n')
+
+                # Print time performance.
+                if step % 10 * log_step > 0:
+                    elapsed_time = time() - start_time
+                    time_per_iter = elapsed_time / step
+                    total_est = elapsed_time / step * max_step
+                    m, s = divmod(total_est, 60)
+                    h, m = divmod(m, 60)
+                    total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
+                    print ('  time (s): {:.2f}, time/iter: {:.4f},'
+                            ' Total est.: {:.4f}').format(
+                                step, elapsed_time, time_per_iter, total_est_str)
 
 
 if __name__ == "__main__":
