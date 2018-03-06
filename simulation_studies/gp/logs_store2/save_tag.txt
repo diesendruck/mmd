@@ -1,0 +1,1 @@
+dn1000_bs800_gen800_w20_d10_zd10_lr0.001_op_rmsprop
