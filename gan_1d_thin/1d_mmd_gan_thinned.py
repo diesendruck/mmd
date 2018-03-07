@@ -26,7 +26,7 @@ parser.add_argument('--depth', type=int, default=6,
 parser.add_argument('--sigma', type=float, default=0.5)
 parser.add_argument('--thin_level', type=float, default=0.5)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
-parser.add_argument('--optimizer', type=str, default='adam',
+parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
 parser.add_argument('--max_step', type=int, default=50001)
@@ -195,7 +195,6 @@ def generator(z, width=3, depth=6, activation=tf.nn.elu, out_dim=1,
 
         out = layers.dense(x, out_dim, activation=None)
     return out
-
 
 # load_data()
 data_unthinned, data = generate_data(data_num)
@@ -396,5 +395,5 @@ for i in range(max_step):
                 print('got 10 for data_unthinned, choose to set make_samples=False, or continue')
                 pdb.set_trace()
 
-os.system(('python eval_samples_thin.py --expt="{}" --thin_a={} '
-    '--thin_b={}').format(expt, thin_a, thin_b))
+os.system('python eval_samples_thin.py --expt="{}" --thin_level={}'.format(
+    expt, thin_level))

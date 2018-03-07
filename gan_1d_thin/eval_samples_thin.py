@@ -12,12 +12,12 @@ from scipy.stats import shapiro, probplot, norm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--expt', type=str, default='test')
-parser.add_argument('--thin_a', type=float, default=0.5)
-parser.add_argument('--thin_b', type=float, default=0.5)
+parser.add_argument('--thin_level', type=float, default=0.5)
 args = parser.parse_args()
 expt = args.expt
-thin_a = args.thin_a
-thin_b = args.thin_b
+thin_level = args.thin_level
+thin_a = 1. - thin_level
+thin_b = thin_level 
 base_path = os.path.join('results', expt, 'logs')
 
 x_orig = np.load(os.path.join(base_path, 'sample_x.npy'))
