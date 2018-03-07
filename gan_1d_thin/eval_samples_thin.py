@@ -12,15 +12,13 @@ from scipy.stats import shapiro, probplot, norm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--expt', type=str, default='test')
-parser.add_argument('--bimodal', type=int, default=1, choices=[0,1])
+parser.add_argument('--thin_a', type=float, default=0.5)
+parser.add_argument('--thin_b', type=float, default=0.5)
 args = parser.parse_args()
 expt = args.expt
-bimodal = args.bimodal
+thin_a = args.thin_a
+thin_b = args.thin_b
 base_path = os.path.join('results', expt, 'logs')
-
-def unimodal_thin_fn(x):
-    return 0.9 / (1 + np.exp(5 * (x - 1))) + 0.1
-
 
 x_orig = np.load(os.path.join(base_path, 'sample_x.npy'))
 g_orig = np.load(os.path.join(base_path, 'sample_g.npy'))
@@ -50,17 +48,15 @@ plt.suptitle('Comparison: X, G, Z', fontsize=30)
 # PLOT THINNED DATA.
 ax1 = plt.subplot(3, 1, 1)
 plt.hist(x, 30, normed=True, color='green', label='x', alpha=0.3)
-xs = np.linspace(-3, 3, 100)
-if bimodal:
-    ys1 = norm.pdf(xs, 0, 0.5)
-    ys2 = norm.pdf(xs, 2, 0.5)
-    ys = 2. / 3. * ys1 + 1. / 3. * ys2
-else:
-    #ys1 = norm.pdf(xs, 0, 1)
-    #th = 0.9 / (1 + np.exp(5 * (xs - 1))) + 0.1
-    #ys = [ys1[i] * th[i] for i in range(len(th))]
-    #ys = ys / np.sum(ys)
-    ys = norm.pdf(xs, 0, 1)
+xs = np.linspace(-3, 5, 100)
+ys1 = norm.pdf(xs, 0, 0.5)
+ys2 = norm.pdf(xs, 2, 0.5)
+C_thin50 = 0.75
+C_thin90 = 0.55
+C = C_thin90
+ys = 1. / C * (0.5 * ys1 + 0.5 * ys2) * \
+    (thin_a / (1 + np.exp(10 * (xs - 1))) + thin_b)
+
 plt.plot(xs, ys, color='green', label='pdf', alpha=0.7)
 plt.title('Distribution comparison: X vs G, m={}, n={}'.format(len(x), len(g)))
 plt.xlabel('Values')
@@ -68,12 +64,7 @@ plt.legend()
 
 ax1 = plt.subplot(3, 1, 2)
 plt.hist(g, 30, normed=True, color='blue', label='g', alpha=0.3)
-xs = np.linspace(min(x), max(x), 100)
-if bimodal:
-    ys_unthinned = 0.5 * ys1 + 0.5 * ys2
-else:
-    ys_unthinned = [i / j for i, j in zip(ys, unimodal_thin_fn(xs))]
-    ys_unthinned = ys_unthinned / sum(ys_unthinned)
+ys_unthinned = 0.5 * ys1 + 0.5 * ys2
 
 plt.plot(xs, ys_unthinned, color='black',
          label='pdf_unthinned', alpha=0.3)
