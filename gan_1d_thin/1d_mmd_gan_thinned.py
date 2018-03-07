@@ -24,20 +24,18 @@ parser.add_argument('--width', type=int, default=3,
 parser.add_argument('--depth', type=int, default=6,
                     help='num of generator layers')
 parser.add_argument('--sigma', type=float, default=0.5)
-parser.add_argument('--thin_a', type=float, default=0.5)
-parser.add_argument('--thin_b', type=float, default=0.5)
+parser.add_argument('--thin_level', type=float, default=0.5)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
 parser.add_argument('--optimizer', type=str, default='adam',
                     choices=['adagrad', 'adam', 'gradientdescent',
                              'rmsprop'])
-parser.add_argument('--max_step', type=int, default=10101)
-parser.add_argument('--save_step', type=int, default=1000)
+parser.add_argument('--max_step', type=int, default=50001)
+parser.add_argument('--save_step', type=int, default=5000)
 parser.add_argument('--expt', type=str, default='test')
 parser.add_argument('--weighting', type=str, default='logistic',
                     choices=['logistic', 'kernel'])
 parser.add_argument('--graph_data', type=int, default=1, choices=[0, 1])
 parser.add_argument('--testing', type=int, default=0, choices=[0, 1])
-parser.add_argument('--bimodal', type=int, default=1, choices=[0, 1])
 
 args = parser.parse_args()
 data_num = args.data_num
@@ -47,8 +45,9 @@ z_dim = args.z_dim
 width = args.width
 depth = args.depth
 sigma = args.sigma
-thin_a = args.thin_a
-thin_b = args.thin_b
+thin_level = args.thin_level
+thin_a = 1. - thin_level 
+thin_b = thin_level 
 learning_rate = args.learning_rate
 optimizer = args.optimizer
 max_step = args.max_step
@@ -57,7 +56,6 @@ expt = args.expt
 weighting = args.weighting
 graph_data = args.graph_data
 testing = args.testing
-bimodal = args.bimodal
 out_dim = 1
 activation = tf.nn.elu
 save_tag = ('expt{}_dn{}_bs{}_gn{}_zd{}_w{}_d{}_lr{}_op_{}_sig{}_thin{}_'
@@ -145,16 +143,10 @@ def prob_of_thinning(x, is_tf=False, weighting='logistic'):
       p: Probability of being thinned.
     '''
     if weighting == 'logistic':
-        if bimodal:
-            if is_tf:
-                p = thin_a / (1 + tf.exp(10 * (x - 1))) + thin_b
-            else:
-                p = thin_a / (1 + np.exp(10 * (x - 1))) + thin_b
+        if is_tf:
+            p = thin_a / (1 + tf.exp(10 * (x - 1))) + thin_b
         else:
-            if is_tf:
-                p = 0.9 / (1 + tf.exp(5 * (x - 1))) + 0.1 
-            else:
-                p = 0.9 / (1 + np.exp(5 * (x - 1))) + 0.1 
+            p = thin_a / (1 + np.exp(10 * (x - 1))) + thin_b
 
     elif weighting == 'kernel':
         if is_tf:
@@ -175,16 +167,8 @@ def generate_data(n):
     '''
     n_c2 = n/2
     n_c1 = n - n_c2
-    if bimodal:
-        print('Using bimodal data')
-        data_unthinned = np.concatenate((np.random.normal(0, 0.5, n_c1),
-                                         np.random.normal(2, 0.5, n_c2)))
-    else:
-        print('Using unimodal data')
-        data_unthinned = np.random.normal(0, 1, n)
-        du = data_unthinned
-        data_unthinned = [i / j for i, j in zip(du, prob_of_thinning(du))]
-        
+    data_unthinned = np.concatenate((np.random.normal(0, 0.5, n_c1),
+                                     np.random.normal(2, 0.5, n_c2)))
 
     data = thin_data(data_unthinned)
     return data_unthinned, data
@@ -196,7 +180,7 @@ def get_random_z(gen_num, z_dim):
     #                         low=-1.0, high=1.0)
     #return np.random.gamma(5, size=[gen_num, z_dim])
     #return np.random.standard_t(2, size=[gen_num, z_dim])
-    return np.random.normal(0, 5, size=[gen_num, z_dim])
+    return np.random.normal(0, 1, size=[gen_num, z_dim])
 
 
 # Set up generator.
