@@ -25,8 +25,11 @@ the data.
 # SETUP, Part 1 of 2: One-time setup, done before sampling.
 def set_up_tf_model_once():
     # Parameters.
-    data_file = '/home/maurice/mmd/simulation_studies/gp/gp_data.txt'
-    log_dir = '/home/maurice/mmd/simulation_studies/gp/logs_store2'
+    #data_file = '/home/maurice/mmd/simulation_studies/gp/gp_data.txt'
+    #log_dir = '/home/maurice/mmd/simulation_studies/gp/logs_store2'
+    data_file = './gp_data.txt'
+    log_dir = './logs_store2'
+
     checkpoint_dir = os.path.join(log_dir, 'checkpoints')
     gen_num = 800 
     z_dim = 10  # Once trained, do not adjust.
