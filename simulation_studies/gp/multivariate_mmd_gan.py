@@ -22,9 +22,9 @@ parser.add_argument('--width', type=int, default=20,
 parser.add_argument('--depth', type=int, default=10,
                     help='num of generator layers')
 parser.add_argument('--z_dim', type=int, default=10)
-parser.add_argument('--log_step', type=int, default=1000)
+parser.add_argument('--log_step', type=int, default=500)
 parser.add_argument('--max_step', type=int, default=200000)
-parser.add_argument('--learning_rate', type=float, default=1e-3)
+parser.add_argument('--learning_rate', type=float, default=1e-4)
 parser.add_argument('--optimizer', type=str, default='rmsprop',
                     choices=['adagrad', 'adam', 'gradientdescent', 'rmsprop'])
 parser.add_argument('--data_file', type=str, default='gp_data.txt')
@@ -91,14 +91,26 @@ def autoencoder(x, width=3, depth=3, activation=tf.nn.elu, z_dim=3,
 def generator(z, width=3, depth=3, activation=tf.nn.elu, out_dim=2,
         reuse=False):
     """Decodes. Generates output, given noise input."""
+    #with tf.variable_scope('generator', reuse=reuse) as vs_g:
+    #    x = dense(z, width, activation=activation)
+
+    #    for idx in range(depth - 1):
+    #        x = dense(x, width, activation=activation, batch_residual=True)
+
+    #    out = dense(x, out_dim, activation=None)
+    #vars_g = tf.contrib.framework.get_variables(vs_g)
+    #return out, vars_g
     with tf.variable_scope('generator', reuse=reuse) as vs_g:
         x = dense(z, width, activation=activation)
 
         for idx in range(depth - 1):
             x = dense(x, width, activation=activation, batch_residual=True)
 
+    with tf.variable_scope('generator_out', reuse=reuse) as vs_g_out:
         out = dense(x, out_dim, activation=None)
-    vars_g = tf.contrib.framework.get_variables(vs_g)
+
+    vars_g = (tf.contrib.framework.get_variables(vs_g) +
+        tf.contrib.framework.get_variables(vs_g_out))
     return out, vars_g
 
 
@@ -212,11 +224,12 @@ def prepare_dirs():
 def build_model(batch_size, gen_num, out_dim, z_dim):
     x = tf.placeholder(tf.float64, [batch_size, out_dim], name='x')
     z = tf.placeholder(tf.float64, [gen_num, z_dim], name='z')
+    z_read = tf.placeholder(tf.float64, [None, z_dim], name='z_read')
 
     g, g_vars = generator(
         z, width=width, depth=depth, activation=activation, out_dim=out_dim)
-    g_read_only, _ = generator(
-        z, width=width, depth=depth, activation=activation, out_dim=out_dim,
+    g_read, _ = generator(
+        z_read, width=width, depth=depth, activation=activation, out_dim=out_dim,
         reuse=True)
     h_out, ae_out, enc_vars, dec_vars = autoencoder(tf.concat([x, g], 0),
         width=width, depth=depth, activation=activation, z_dim=z_dim,
@@ -257,7 +270,7 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
     d_vars_ = enc_vars_ + dec_vars_
     d_optim = d_opt.apply_gradients(zip(d_grads_, d_vars_))
     g_optim = g_opt.minimize(g_loss, var_list=g_vars)
-    return x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim
+    return x, z, z_read, g, g_read, ae_loss, d_loss, mmd, d_optim, g_optim
 
 
 #def get_sample(gen_num=200, tag='test', checkpoint_dir=None):
@@ -281,7 +294,7 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
 #    data, data_num, out_dim = load_data(data_num)
 #    if checkpoint_dir is None:
 #        _, checkpoint_dir = prepare_dirs()
-#    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
+#    x, z, g, g_read, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
 #        batch_size, gen_num, out_dim, z_dim)
 #    init_op = tf.global_variables_initializer()
 #    saver = tf.train.Saver()
@@ -301,7 +314,7 @@ def build_model(batch_size, gen_num, out_dim, z_dim):
 #    random_batch_data = np.array(
 #        [data[d] for d in np.random.choice(len(data), batch_size)])
 #    random_batch_z = get_random_z(gen_num, z_dim)
-#    g_out = sess.run(g_read_only,
+#    g_out = sess.run(g_read,
 #        feed_dict={
 #            z: random_batch_z,
 #            x: random_batch_data})
@@ -332,8 +345,8 @@ def main():
 
     data, data_num, out_dim = load_data(data_num)
     log_dir, checkpoint_dir, plot_dir = prepare_dirs()
-    x, z, g, g_read_only, ae_loss, d_loss, mmd, d_optim, g_optim = build_model(
-        batch_size, gen_num, out_dim, z_dim)
+    x, z, z_read, g, g_read, ae_loss, d_loss, mmd, d_optim, g_optim = \
+        build_model(batch_size, gen_num, out_dim, z_dim)
     init_op = tf.global_variables_initializer()
     saver = tf.train.Saver()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.333)
