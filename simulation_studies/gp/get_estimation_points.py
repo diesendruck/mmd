@@ -1,15 +1,13 @@
 import os
 import pdb
-import sys
 import numpy as np
 import tensorflow as tf
-from multivariate_mmd_gan import build_model, load_checkpoint 
 from weighting import get_estimation_points 
 
 
 def load_model_and_get_points():
     # Set FIXED model parameters.
-    model = 'test'
+    model = 'store3'
     ckpt = '48000'
     z_dim = 10  # Fixed, once model is trained.
     log_dir = '/home/maurice/mmd/simulation_studies/gp/logs_{}'.format(model)
