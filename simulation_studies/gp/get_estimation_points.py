@@ -10,11 +10,11 @@ from weighting import get_estimation_points
 def load_model_and_get_points():
     # Set FIXED model parameters.
     model = 'test'
-    z_dim = 10  # Fixed, once model is trained.
     ckpt = '48000'
+    z_dim = 10  # Fixed, once model is trained.
     log_dir = '/home/maurice/mmd/simulation_studies/gp/logs_{}'.format(model)
     checkpoint_dir = os.path.join(log_dir, 'checkpoints')
-    checkpoint_file = os.path.join(checkpoint_dir, '{}-{}.meta'.format(model, ckpt))
+    checkpoint_file = os.path.join(checkpoint_dir, 'test-{}.meta'.format(ckpt))
 
     # Create an empty graph for the session.
     loaded_graph = tf.Graph()
@@ -35,7 +35,7 @@ def load_model_and_get_points():
 
         ###############################
         # RUN THE MODEL AND GET POINTS.
-        gen_num = 13
+        gen_num = 800
         g_out = sess.run(g_out_tensor, 
             feed_dict={ 
                 z_tensor: np.random.normal(size=[gen_num, z_dim])})
