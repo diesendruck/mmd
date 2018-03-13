@@ -234,8 +234,8 @@ def main(data_file, batch_size, gen_num, optimizer, learning_rate):
 
 def get_points():
     data_file = 'gp_data.txt'
-    batch_size = 800
-    gen_num = 800
+    batch_size = 100
+    gen_num = 100
     optimizer = 'rmsprop'
     learning_rate = 1e-3
     mode = 'coreset'
