@@ -224,6 +224,88 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         return mmd, exp_object
 
 
+def plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+        log_dir, filename_tag=None):
+    sparse = 1
+    if sparse:
+        random_batch_data = np.array(
+            [data[d] for d in np.random.choice(len(data), batch_size)])
+        # Plot marginals.
+        num_cols = raw_data.shape[1]
+        sq_dim = int(np.ceil(np.sqrt(num_cols)))
+        fig, axs = plt.subplots(4, 5, figsize=(20, 16))
+        fig.subplots_adjust(hspace=0.05, wspace=0.05)
+        axs = axs.ravel()
+        bins = 30
+        for ind_i, i in enumerate(cols_to_use):
+            mmd_i_data_gen, _ = compute_mmd(
+                random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
+            plot_d = raw_data[:, ind_i]
+            plot_g = g_out[:, ind_i]
+            axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
+            axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
+            #axs[i].tick_params(axis='both', which='both', bottom='off', top='off',
+            #    labelbottom='off', right='off', left='off', labelleft='off')
+            axs[i].axis('off')
+        if filename_tag:
+            filename = 'plot_marginals_{}.png'.format(filename_tag)
+        else:
+            filename = 'plot_marginals_{}.png'.format(step)
+        plt.savefig(os.path.join(log_dir, filename))
+        plt.close('all')
+    else:
+        random_batch_data = np.array(
+            [data[d] for d in np.random.choice(len(data), batch_size)])
+        # Plot marginals.
+        num_cols = raw_data.shape[1]
+        sq_dim = int(np.ceil(np.sqrt(num_cols)))
+        fig, axs = plt.subplots(4, 5, figsize=(20, 16))
+        fig.subplots_adjust(hspace=0.5, wspace=0.5)
+        fig.suptitle('Marginals, it{}'.format(step))
+        axs = axs.ravel()
+        bins = 40
+        for ind_i, i in enumerate(cols_to_use):
+            mmd_i_data_gen, _ = compute_mmd(
+                random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
+            plot_d = raw_data[:, ind_i]
+            plot_g = g_out[:, ind_i]
+            axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
+            axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
+            axs[i].set_xlabel('mmd = {:.3f}'.format(mmd_i_data_gen))
+            axs[i].legend()
+        if filename_tag:
+            filename = 'plot_marginals_{}.png'.format(filename_tag)
+        else:
+            filename = 'plot_marginals_{}.png'.format(step)
+        plt.savefig(os.path.join(log_dir, filename))
+        plt.close('all')
+
+
+def plot_correlations(raw_data, step, cols_to_use, g_out, log_dir):
+    num_cols = raw_data.shape[1]
+    corr_coefs_data = np.zeros((num_cols, num_cols))
+    corr_coefs_gens = np.zeros((num_cols, num_cols))
+    for ind_i, i in enumerate(cols_to_use):
+        for ind_j, j in enumerate(cols_to_use):
+            if j > i:
+                corr_coefs_data[i][j], _ = pearsonr(
+                        raw_data[:, ind_i], raw_data[:, ind_j])
+                corr_coefs_gens[i][j], _ = pearsonr(
+                        g_out[:, ind_i], g_out[:, ind_j])
+    coefs_d = corr_coefs_data.flatten()
+    coefs_g = corr_coefs_gens.flatten()
+    coefs_d = coefs_d[coefs_d != 0]
+    coefs_g = coefs_g[coefs_g != 0]
+    fig, ax = plt.subplots()
+    ax.scatter(coefs_d, coefs_g)
+    ax.plot(ax.get_xlim(), ax.get_ylim(), ls='-')
+    ax.set_xlabel('Correlation data')
+    ax.set_ylabel('Correlation gens')
+    plt.savefig(os.path.join(log_dir, 'plot_correlations_{}.png'.format(
+        step)))
+    plt.close('all')
+
+
 def load_checkpoint(saver, sess, checkpoint_dir):
     import re
     print(" [*] Reading checkpoints...")
@@ -430,14 +512,19 @@ if load_existing and sample_n:
         else:
             row[19] = 1.0
         g_out[i] = row
-    out_name = os.path.join(log_dir, 'g_out_{}'.format(sample_n))
+    out_name = os.path.join(log_dir, 'g_out_sample_{}'.format(sample_n))
     np.save(out_name + '.npy', g_out)
     np.savetxt(out_name + '.csv', g_out, delimiter=',')
     print('Saved npy and csv of:\n{}'.format(out_name))
+
+    plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+        log_dir, filename_tag='sample_{}'.format(sample_n))
     sys.exit('Finished sampling n.')
+
 elif load_existing:
     print('Contining training on checkpoint_dir:\n  {}.'.format(
         checkpoint_dir))
+
 else:
     print('Training new model, and storing at checkpoint_dir:\n  {}.'.format(
         checkpoint_dir))
@@ -470,7 +557,8 @@ for step in range(load_step, max_step):
         summary_writer.add_summary(summary_, step)
         summary_writer.flush()
 
-        '''
+        """
+        # Inspect size of exponential object, for evaluating kernel bandwidth.
         enc_x_, enc_g_, exp_object_, mmd_ = sess.run(
             [enc_x, enc_g, exp_object, mmd],
                 feed_dict={
@@ -478,7 +566,7 @@ for step in range(load_step, max_step):
                     x: random_batch_data})
         print(np.exp(-0.5 * exp_object_))
         pdb.set_trace()
-        '''
+        """
 
         # Print some loss values.
         d_loss_, ae_loss_, mmd_, g_ = sess.run(
@@ -488,27 +576,6 @@ for step in range(load_step, max_step):
         print('Iter:{}, d_loss = {:.4f}, ae_loss = {:.4f}, '
             'L * mmd = {:.4f}, mmd = {:.4f}'.format(step, d_loss_, ae_loss_,
                 lambda_mmd * mmd_, mmd_))
-
-        '''
-        # Difference of pairwise MMDs.
-        if data_file:
-            #num_marginals = len(cols_to_use)
-            marginal_mmds = np.zeros((num_cols, num_cols))
-            for ind_i, i in enumerate(cols_to_use):
-                for ind_j, j in enumerate(cols_to_use):
-                    if j >= i:
-                        mmd_ij_data = compute_mmd(
-                            random_batch_data[:, ind_i], 
-                            random_batch_data[:, ind_j], use_tf=False) 
-                        mmd_ij_gen = compute_mmd(
-                            g_[:, ind_i], g_[:, ind_j], use_tf=False) 
-                        marginal_mmds[i][j] = mmd_ij_gen - mmd_ij_data
-
-                        #marginal_mmds[i][j] = compute_mmd(
-                        #    random_batch_data[:, i], g_[:, j], use_tf=False)
-            print(np.round(marginal_mmds, 2))
-            print
-        '''
 
         # Save generated data to NumPy file and to output collection.
         # NOTE: First un-norm, then round values in binary cols.
@@ -535,76 +602,9 @@ for step in range(load_step, max_step):
         # PLOTTING RESULTS.
         plot = 1
         if plot:
-            # Make scatter plots.
-            '''
-            if out_dim > 2:
-                MAX_TO_PLOT = 5
-                indices_to_plot = np.arange(min(MAX_TO_PLOT, out_dim))
-                indices_to_plot = [11, 12, 13, 14, 15]
-            elif out_dim == 2:
-                indices_to_plot = range(out_dim)
-                fig, ax = plt.subplots()
-                ax.scatter(*zip(*data), color='gray', alpha=0.05)
-                ax.scatter(*zip(*g_out), color='green', alpha=0.3)
-                plt.savefig(os.path.join(
-                    log_dir, 'scatter_{}_i{}.png'.format(save_tag, step)))
-                plt.close(fig)
-            else:
-                indices_to_plot = range(out_dim)
-
-            # Make pair plots.
-            pairplot_data = sb.pairplot(
-                pd.DataFrame(random_batch_data[:, indices_to_plot]))
-            plt.title('Marginals: {}'.format(indices_to_plot))
-            pairplot_data.savefig('pairplot_data.png')
-            pairplot_simulation = sb.pairplot(
-                pd.DataFrame(g_out[:, indices_to_plot]))
-            pairplot_simulation.savefig('pairplot_simulation.png')
-            plt.close('all')
-            '''
-            # Plot marginals.
-            num_cols = raw_data.shape[1]
-            sq_dim = int(np.ceil(np.sqrt(num_cols)))
-            fig, axs = plt.subplots(4, 5, figsize=(20, 16))
-            fig.subplots_adjust(hspace=0.5, wspace=0.5)
-            fig.suptitle('Marginals, it{}'.format(step))
-            axs = axs.ravel()
-            bins = 40
-            for ind_i, i in enumerate(cols_to_use):
-                mmd_i_data_gen, _ = compute_mmd(
-                    random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
-                plot_d = raw_data[:, ind_i]
-                plot_g = g_out[:, ind_i]
-                axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
-                axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
-                axs[i].set_xlabel('mmd = {:.3f}'.format(mmd_i_data_gen))
-                axs[i].legend()
-            plt.savefig(os.path.join(log_dir, 'plot_marginals_{}.png'.format(
-                step)))
-            plt.close('all')
-            
-            # Plot correlations.
-            corr_coefs_data = np.zeros((num_cols, num_cols))
-            corr_coefs_gens = np.zeros((num_cols, num_cols))
-            for ind_i, i in enumerate(cols_to_use):
-                for ind_j, j in enumerate(cols_to_use):
-                    if j > i:
-                        corr_coefs_data[i][j], _ = pearsonr(
-                                raw_data[:, ind_i], raw_data[:, ind_j])
-                        corr_coefs_gens[i][j], _ = pearsonr(
-                                g_out[:, ind_i], g_out[:, ind_j])
-            coefs_d = corr_coefs_data.flatten()
-            coefs_g = corr_coefs_gens.flatten()
-            coefs_d = coefs_d[coefs_d != 0]
-            coefs_g = coefs_g[coefs_g != 0]
-            fig, ax = plt.subplots()
-            ax.scatter(coefs_d, coefs_g)
-            ax.plot(ax.get_xlim(), ax.get_ylim(), ls='-')
-            ax.set_xlabel('Correlation data')
-            ax.set_ylabel('Correlation gens')
-            plt.savefig(os.path.join(log_dir, 'plot_correlations_{}.png'.format(
-                step)))
-            plt.close('all')
+            plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+                log_dir)
+            plot_correlations(raw_data, step, cols_to_use, g_out, log_dir)
 
         # Print time performance.
         if step % log_step == 0 and step > 0:
