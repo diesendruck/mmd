@@ -4,6 +4,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.linalg import norm
 import os
 import pdb
 import sys
@@ -224,29 +225,28 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         return mmd, exp_object
 
 
-def plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+def plot_marginals(train_raw_data, data, batch_size, step, cols_to_use, g_out,
         log_dir, filename_tag=None):
     sparse = 1
     if sparse:
         random_batch_data = np.array(
             [data[d] for d in np.random.choice(len(data), batch_size)])
-        # Plot marginals.
-        num_cols = raw_data.shape[1]
+        num_cols = train_raw_data.shape[1]
         sq_dim = int(np.ceil(np.sqrt(num_cols)))
         fig, axs = plt.subplots(4, 5, figsize=(20, 16))
         fig.subplots_adjust(hspace=0.05, wspace=0.05)
-        axs = axs.ravel()
+        axs = axs.ravel()  # Drop last one, because only using 19 cols.
         bins = 30
         for ind_i, i in enumerate(cols_to_use):
             mmd_i_data_gen, _ = compute_mmd(
                 random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
-            plot_d = raw_data[:, ind_i]
+            plot_d = train_raw_data[:, ind_i]
             plot_g = g_out[:, ind_i]
             axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
             axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
-            #axs[i].tick_params(axis='both', which='both', bottom='off', top='off',
-            #    labelbottom='off', right='off', left='off', labelleft='off')
-            axs[i].axis('off')
+            axs[i].tick_params(axis='both', which='both', bottom='off', top='off',
+                labelbottom='off', right='off', left='off', labelleft='off')
+        axs[19].axis('off')
         if filename_tag:
             filename = 'plot_marginals_{}.png'.format(filename_tag)
         else:
@@ -257,7 +257,7 @@ def plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
         random_batch_data = np.array(
             [data[d] for d in np.random.choice(len(data), batch_size)])
         # Plot marginals.
-        num_cols = raw_data.shape[1]
+        num_cols = train_raw_data.shape[1]
         sq_dim = int(np.ceil(np.sqrt(num_cols)))
         fig, axs = plt.subplots(4, 5, figsize=(20, 16))
         fig.subplots_adjust(hspace=0.5, wspace=0.5)
@@ -267,7 +267,7 @@ def plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
         for ind_i, i in enumerate(cols_to_use):
             mmd_i_data_gen, _ = compute_mmd(
                 random_batch_data[:, ind_i], g_[:, ind_i], use_tf=False)
-            plot_d = raw_data[:, ind_i]
+            plot_d = train_raw_data[:, ind_i]
             plot_g = g_out[:, ind_i]
             axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
             axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
@@ -281,15 +281,15 @@ def plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
         plt.close('all')
 
 
-def plot_correlations(raw_data, step, cols_to_use, g_out, log_dir):
-    num_cols = raw_data.shape[1]
+def plot_correlations(train_raw_data, step, cols_to_use, g_out, log_dir):
+    num_cols = train_raw_data.shape[1]
     corr_coefs_data = np.zeros((num_cols, num_cols))
     corr_coefs_gens = np.zeros((num_cols, num_cols))
     for ind_i, i in enumerate(cols_to_use):
         for ind_j, j in enumerate(cols_to_use):
             if j > i:
                 corr_coefs_data[i][j], _ = pearsonr(
-                        raw_data[:, ind_i], raw_data[:, ind_j])
+                        train_raw_data[:, ind_i], train_raw_data[:, ind_j])
                 corr_coefs_gens[i][j], _ = pearsonr(
                         g_out[:, ind_i], g_out[:, ind_j])
     coefs_d = corr_coefs_data.flatten()
@@ -299,11 +299,53 @@ def plot_correlations(raw_data, step, cols_to_use, g_out, log_dir):
     fig, ax = plt.subplots()
     ax.scatter(coefs_d, coefs_g)
     ax.plot(ax.get_xlim(), ax.get_ylim(), ls='-')
-    ax.set_xlabel('Correlation data')
-    ax.set_ylabel('Correlation gens')
+    #ax.set_xlabel('Correlation data')
+    #ax.set_ylabel('Correlation gens')
     plt.savefig(os.path.join(log_dir, 'plot_correlations_{}.png'.format(
         step)))
     plt.close('all')
+
+
+def evaluate_disclosure_risk(train, test, sim):
+    """Assess privacy of simulations.
+    
+    Compute True Pos., True Neg., False Pos., and False Neg. rates of
+    finding a neighbor in the simulations, for each of a subset of training
+    data and a subset of test data.
+    Args:
+      train: Numpy array of all training data.
+      test: Numpy array of all test data (smaller than train).
+      sim: Numpy array of simulations.
+    Return:
+      sensitivity: Float of TP / (TP + FN).
+      precision: Float of TP / (TP + FP).
+    """
+    assert len(test) < len(train), 'test should be smaller than train'
+    ball_radius = 20 
+    num_samples = len(test)
+    compromised_records = train[:num_samples]
+    tp, tn, fp, fn = 0, 0, 0, 0
+
+    # Count true positives and false negatives.
+    for i in compromised_records:
+        distances_from_i = norm(i - sim, axis=1)
+        has_neighbor = np.any(distances_from_i < ball_radius)
+        if has_neighbor:
+            tp += 1
+        else:
+            fn += 1
+    # Count false positives and true negatives.
+    for i in test:
+        distances_from_i = norm(i - sim, axis=1)
+        has_neighbor = np.any(distances_from_i < ball_radius)
+        if has_neighbor:
+            fp += 1
+        else:
+            tn += 1
+
+    sensitivity = float(tp) / (tp + fn)
+    precision = float(tp + 1e-10) / (tp + fp + 1e-10)
+    return sensitivity, precision, ball_radius, tp, fn, fp
 
 
 def load_checkpoint(saver, sess, checkpoint_dir):
@@ -338,29 +380,34 @@ log_dir, checkpoint_dir = prepare_dirs()
 
 # load_data().
 if data_file:
-    raw_data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    orig_raw_data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    # Upfront, drop 2nd-to-last col. Last col idx is 19, so drop 18.
+    raw_data = np.delete(orig_raw_data, 18, 1)  
     num_cols = raw_data.shape[1]
-    norm_data = 1
+
+    # Separate train and test data.
+    num_train = int(0.9 * raw_data.shape[0])
+    train_raw_data = raw_data[:num_train]
+    test_raw_data = raw_data[num_train:]
 
     print('\nRaw data:')
     for i in range(num_cols):
         print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
-            *fivenum(raw_data[:,i])))
-    if norm_data:
-        print('\nNormed data:')
+            *fivenum(train_raw_data[:,i])))
 
-        # Don't normalize binary vars.
-        # NOTE: This is tailored to each data set!
-        mean_mask = [1] * 17 + [0, 0, 0]  
-        std_mask = [1] * 20
+    # Don't normalize binary vars.
+    # NOTE: This is tailored to each data set!
+    mean_mask = [1] * 17 + [0, 0]  
+    std_mask = [1] * 19 
 
-        mean_vec = raw_data.mean(0) * mean_mask
-        std_vec = raw_data.std(0) * std_mask
-        data = (raw_data - mean_vec) / std_vec 
+    mean_vec = train_raw_data.mean(0) * mean_mask
+    std_vec = train_raw_data.std(0) * std_mask
+    data = (train_raw_data - mean_vec) / std_vec 
 
-        for i in range(data.shape[1]):
-            print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
-                *fivenum(data[:,i])))
+    print('\nNormed data:')
+    for i in range(data.shape[1]):
+        print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
+            *fivenum(data[:,i])))
 
     # Optionally exclude some columns.
     excluded_cols = []
@@ -465,10 +512,13 @@ with open(os.path.join(log_dir, 'save_tag.txt'), 'w') as save_tag_file:
     save_tag_file.write(save_tag)
 print save_tag
 
-# Set up output file.
+# Set up cumulative output files.
 g_out_file = os.path.join(log_dir, 'g_out.txt')
-if os.path.isfile(g_out_file):
+disclosure_risk_file = os.path.join(log_dir, 'disclosure_risk.txt')
+if os.path.isfile(g_out_file) and not load_existing:
     os.remove(g_out_file)
+if os.path.isfile(disclosure_risk_file) and not load_existing:
+    os.remove(disclosure_risk_file)
 
 # Start time.
 start_time = time()
@@ -507,17 +557,17 @@ if load_existing and sample_n:
             row[18] = 0.0
         else:
             row[18] = 1.0
-        if row[19] < 0.5:
-            row[19] = 0.0
-        else:
-            row[19] = 1.0
+        #if row[19] < 0.5:
+        #    row[19] = 0.0
+        #else:
+        #    row[19] = 1.0
         g_out[i] = row
     out_name = os.path.join(log_dir, 'g_out_sample_{}'.format(sample_n))
     np.save(out_name + '.npy', g_out)
     np.savetxt(out_name + '.csv', g_out, delimiter=',')
     print('Saved npy and csv of:\n{}'.format(out_name))
 
-    plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+    plot_marginals(train_raw_data, data, batch_size, step, cols_to_use, g_out,
         log_dir, filename_tag='sample_{}'.format(sample_n))
     sys.exit('Finished sampling n.')
 
@@ -568,7 +618,7 @@ for step in range(load_step, max_step):
         pdb.set_trace()
         """
 
-        # Print some loss values.
+        # Print model loss values.
         d_loss_, ae_loss_, mmd_, g_ = sess.run(
             [d_loss, ae_loss, mmd, g], feed_dict={
                 z: random_batch_z,
@@ -589,22 +639,30 @@ for step in range(load_step, max_step):
                 row[18] = 0.0
             else:
                 row[18] = 1.0
-            if row[19] < 0.5:
-                row[19] = 0.0
-            else:
-                row[19] = 1.0
+            #if row[19] < 0.5:  # Related to upfront drop of 2nd-to-last col.
+            #    row[19] = 0.0
+            #else:
+            #    row[19] = 1.0
             g_out[i] = row
         np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
         np.savetxt(os.path.join(log_dir, 'g_out.csv'), g_out, delimiter=',')
-        with open(g_out_file, 'a') as f:
-            f.write(str(g_out) + '\n')
+        with open(g_out_file, 'a') as gf:
+            gf.write(str(g_out) + '\n')
+
+        # Print disclosure risk values.
+        sensitivity, precision, ball_radius, tp, fn, fp = evaluate_disclosure_risk(
+            train_raw_data, test_raw_data, g_out)
+        print('  sens={:.4f}, prec={:.4f}, br={}, tp={}, fn={}, fp={} '.format(
+            sensitivity, precision, ball_radius, tp, fn, fp))
+        with open(disclosure_risk_file, 'a') as df:
+            df.write(','.join(map(str, [sensitivity, precision])) + '\n')
 
         # PLOTTING RESULTS.
         plot = 1
         if plot:
-            plot_marginals(raw_data, data, batch_size, step, cols_to_use, g_out,
+            plot_marginals(train_raw_data, data, batch_size, step, cols_to_use, g_out,
                 log_dir)
-            plot_correlations(raw_data, step, cols_to_use, g_out, log_dir)
+            plot_correlations(train_raw_data, step, cols_to_use, g_out, log_dir)
 
         # Print time performance.
         if step % log_step == 0 and step > 0:
