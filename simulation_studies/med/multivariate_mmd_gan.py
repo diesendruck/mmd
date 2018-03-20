@@ -510,9 +510,6 @@ sess = tf.Session(config=sess_config)
 sess.run(init_op)
 
 # Set save tag, as a function of config parameters.
-#save_tag = '{}_dn{}_bs{}_gen{}_zd{}_w{}_d{}_lr{}_op_{}_lbmmd{}'.format(
-#    tag, data_num, batch_size, gen_num, z_dim, width, depth, learning_rate,
-#    optimizer, lambda_mmd)
 save_tag = str(args) + '_binary_cols={}'.format(binary_cols)
 with open(os.path.join(log_dir, 'save_tag.txt'), 'w') as save_tag_file:
     save_tag_file.write(save_tag)
@@ -565,6 +562,7 @@ if load_existing and sample_n:
 
     plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
         filename_tag='sample_{}'.format(sample_n), plot_sparse=plot_sparse)
+    plot_correlations(train_raw_data, step, g_out, log_dir)
     # If only sampling from existing model, exit before training.
     sys.exit('Finished sampling n.')
 
