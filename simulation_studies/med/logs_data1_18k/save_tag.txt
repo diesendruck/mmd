@@ -1,0 +1,1 @@
+Namespace(ball_radius=20, batch_size=1000, data_file='data1.csv', data_num=1000, depth=3, gen_num=1000, lambda_mmd=0.1, learning_rate=0.001, load_existing=True, log_step=500, lr_update_step=20000, max_step=500000, optimizer='rmsprop', plot_sparse=True, sample_n=0, tag='test', train_percent=0.9, width=100, z_dim=64)_binary_cols=[20, 21, 22]
