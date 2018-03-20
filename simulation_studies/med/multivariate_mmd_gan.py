@@ -562,7 +562,6 @@ if load_existing and sample_n:
 
     plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
         filename_tag='sample_{}'.format(sample_n), plot_sparse=plot_sparse)
-    plot_correlations(train_raw_data, step, g_out, log_dir)
     # If only sampling from existing model, exit before training.
     sys.exit('Finished sampling n.')
 
