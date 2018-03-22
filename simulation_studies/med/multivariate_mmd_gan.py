@@ -28,8 +28,6 @@ parser.add_argument('--width', type=int, default=100,
 parser.add_argument('--depth', type=int, default=3, 
                     help='num of generator layers')
 parser.add_argument('--lambda_mmd', type=float, default=1e-1)
-parser.add_argument('--ball_radius', type=float, default=20,
-                    help='determines neighbors in disclosure risk estimation')
 parser.add_argument('--log_step', type=int, default=500)
 parser.add_argument('--max_step', type=int, default=500000)
 parser.add_argument('--learning_rate', type=float, default=1e-3)
@@ -53,7 +51,6 @@ z_dim = args.z_dim
 width = args.width
 depth = args.depth
 lambda_mmd = args.lambda_mmd
-ball_radius = args.ball_radius
 log_step = args.log_step
 max_step = args.max_step
 learning_rate = args.learning_rate
@@ -309,39 +306,44 @@ def plot_correlations(train_raw_data, step, g_out, log_dir):
     plt.close('all')
 
 
-def evaluate_disclosure_risk(train, test, sim, ball_radius):
-    """Assess privacy of simulations.
+def evaluate_presence_risk(all_train, test, sim):
+    """Assess presence disclosure risk of simulations.
     
-    Compute True Pos., True Neg., False Pos., and False Neg. rates of
-    finding a neighbor in the simulations, for each of a subset of training
-    data and a subset of test data.
+    For each candidate record in a subset of training data, compute counts of
+    True Pos, True Neg, False Pos, and False Neg, where positive classification
+    indicates that the candidate has a neighbor in the simulation set.
+    
     Args:
-      train: Numpy array of all training data.
-      test: Numpy array of all test data (smaller than train).
+      all_train: Numpy array of all training data.
+      test: Numpy array of test data (smaller than train).
       sim: Numpy array of simulations.
-      ball_radius: Float, size of ball around candidate point, used to
+      presence_margin: Float, size of ball around candidate point, used to
         compute whether a neighbor is found.
+
     Return:
       sensitivity: Float of TP / (TP + FN).
       precision: Float of TP / (TP + FP).
     """
-    assert len(test) < len(train), 'test should be smaller than train'
+    # Constants.
+    presence_margin = 10. 
+
+    assert len(test) < len(all_train), 'test should be smaller than train'
     num_samples = len(test)
-    compromised_records = train[:num_samples]
+    compromised_records = all_train[:num_samples]
     tp, tn, fp, fn = 0, 0, 0, 0
 
     # Count true positives and false negatives.
-    for i in compromised_records:
-        distances_from_i = norm(i - sim, axis=1)
-        has_neighbor = np.any(distances_from_i < ball_radius)
+    for r in compromised_records:
+        distances_from_r = norm(r - sim, axis=1)
+        has_neighbor = np.any(distances_from_r < presence_margin)
         if has_neighbor:
             tp += 1
         else:
             fn += 1
     # Count false positives and true negatives.
-    for i in test:
-        distances_from_i = norm(i - sim, axis=1)
-        has_neighbor = np.any(distances_from_i < ball_radius)
+    for t in test:
+        distances_from_t = norm(t - sim, axis=1)
+        has_neighbor = np.any(distances_from_t < presence_margin)
         if has_neighbor:
             fp += 1
         else:
@@ -349,7 +351,108 @@ def evaluate_disclosure_risk(train, test, sim, ball_radius):
 
     sensitivity = float(tp) / (tp + fn)
     precision = float(tp + 1e-10) / (tp + fp + 1e-10)
-    return sensitivity, precision, ball_radius, tp, fn, fp
+    return sensitivity, precision, presence_margin, tp, fn, fp
+
+
+def evaluate_attribute_risk(all_train, test, sim, binary_cols):
+    """Assess attribute disclosure risk of simulations.
+    
+    For each candidate record in a subset of training data, consider that some
+    subset of its features are known. Using only these known features, find
+    neighbors in simulation set, and compute mean of remaining features. Count
+    True Pos, True Neg, False Pos, and False Neg, where positive classification
+    indicates that a feature's mean over simulations is within margin of error
+    of the true feature values.
+
+    Args:
+      all_train: Numpy array of all training data.
+      test: Numpy array of test data (smaller than train).
+      sim: Numpy array of simulations.
+      binary_cols: Numpy array of binary column indices.
+      k: Int, number of neighbors to include.
+      attribute_margin: Float, margin of error, for feature mean over
+        simulations to be considered a match.
+
+    Return:
+      sensitivity: Float of TP / (TP + FN).
+      precision: Float of TP / (TP + FP).
+    """
+    # Constants.
+    k = 10
+    attribute_margin = 0.01
+    pct_attributes_known = 0.1
+
+    assert len(test) < len(all_train), 'test should be smaller than train'
+    num_compromised = test.shape[0]
+    num_attributes = test.shape[1]
+    compromised_records = all_train[:num_compromised] 
+    attr_idxs = np.random.choice(num_attributes,
+        int(pct_attributes_known * num_attributes), replace=False)
+    attr_bool = np.zeros(num_attributes, dtype=np.bool)
+    attr_bool[attr_idxs] = True 
+    attr_complement_idxs = np.arange(num_attributes)[~attr_bool]
+
+    tp, tn, fp, fn = 0, 0, 0, 0
+
+    # Count true positives and false negatives.
+    for r in compromised_records:
+        r = np.array(r)
+        distances_from_r = norm(r[attr_bool] - sim[:, attr_bool], axis=1)
+        k_nearest_idxs = distances_from_r.argsort()[:k]
+        k_nearest_neighbors = sim[k_nearest_idxs]
+        neighbors_complement_features = k_nearest_neighbors[:, ~attr_bool]
+        neighbors_complement_features_mean = np.mean(neighbors_complement_features, axis=0)
+        r_complement_features = r[~attr_bool]
+        # Add TP and FN of each feature independently.
+        for i, complement_idx in enumerate(attr_complement_idxs):
+            neighbor_mean = neighbors_complement_features_mean[i]
+            r_feature = r_complement_features[i]
+            if complement_idx in binary_cols:
+                # In binary case
+                if ((neighbor_mean < 0.5 and r_feature == 0) or
+                    (neighbor_mean >= 0.5 and r_feature == 1)):
+                    tp += 1
+                else:
+                    fn += 1
+            else:
+                # In continuous case, measure relative error.
+                relative_error = abs(float(neighbor_mean - r_feature) / r_feature)
+                if relative_error < attribute_margin:
+                    tp += 1
+                else:
+                    fn += 1
+
+    # Count false positives and true negatives.
+    for t in test:
+        t = np.array(t)
+        distances_from_t = norm(t[attr_bool] - sim[:, attr_bool], axis=1)
+        k_nearest_idxs = distances_from_t.argsort()[:k]
+        k_nearest_neighbors = sim[k_nearest_idxs]
+        neighbors_complement_features = k_nearest_neighbors[:, ~attr_bool]
+        neighbors_complement_features_mean = np.mean(neighbors_complement_features, axis=0)
+        t_complement_features = t[~attr_bool]
+        # Add TP and FN of each feature independently.
+        for i, complement_idx in enumerate(attr_complement_idxs):
+            neighbor_mean = neighbors_complement_features_mean[i]
+            t_feature = t_complement_features[i]
+            if complement_idx in binary_cols:
+                # In binary case
+                if ((neighbor_mean < 0.5 and t_feature == 0) or
+                    (neighbor_mean >= 0.5 and t_feature == 1)):
+                    fp += 1
+                else:
+                    tn += 1
+            else:
+                # In continuous case, measure relative error.
+                relative_error = float(neighbor_mean - t_feature) / t_feature
+                if relative_error < attribute_margin:
+                    fp += 1
+                else:
+                    tn += 1
+
+    sensitivity = float(tp) / (tp + fn)
+    precision = float(tp + 1e-10) / (tp + fp + 1e-10)
+    return sensitivity, precision, attribute_margin, tp, fn, fp
 
 
 def load_checkpoint(saver, sess, checkpoint_dir):
@@ -379,6 +482,10 @@ def prepare_dirs():
     return log_dir, checkpoint_dir
 
 
+###############################################################################
+
+# BEGIN: Data Preparation.
+
 # Prepare directories for logging and checkpoints.
 log_dir, checkpoint_dir = prepare_dirs()
 
@@ -391,6 +498,7 @@ if data_file:
     num_train = int(train_percent * orig_raw_data.shape[0])
     train_raw_data = orig_raw_data[:num_train]
     test_raw_data = orig_raw_data[num_train:]
+    num_test = len(test_raw_data)
 
     print('\nRaw data:')
     for i in range(num_cols):
@@ -404,18 +512,13 @@ if data_file:
             binary_cols.append(col)
     print('binary_cols={}'.format(binary_cols))
 
-    standardize = 1
-    if standardize:
-        # Don't standardize binary vars.
-        mean_mask = np.array([1] * num_cols)
-        mean_mask[binary_cols] = 0  
-        std_mask = np.array([1] * num_cols) 
-        mean_vec = train_raw_data.mean(0) * mean_mask
-        std_vec = train_raw_data.std(0) * std_mask
-        data = (train_raw_data - mean_vec) / std_vec 
-    else:
-        # Normalize.
-        data = train_raw_data / np.max(train_raw_data, axis=0)
+    # Don't standardize binary vars.
+    mean_mask = np.array([1] * num_cols)
+    mean_mask[binary_cols] = 0  
+    std_mask = np.array([1] * num_cols) 
+    mean_vec = train_raw_data.mean(0) * mean_mask
+    std_vec = train_raw_data.std(0) * std_mask
+    data = (train_raw_data - mean_vec) / std_vec 
 
     print('\nStandardized data:')
     for i in range(data.shape[1]):
@@ -429,8 +532,11 @@ else:
     data = (data - data.mean(0))/data.std(0)
     out_dim = data.shape[1]
 
+# END: Data Preparation.
 
-# build_model().
+
+# BEGIN: Build Model.
+
 x = tf.placeholder(tf.float64, [None, out_dim], name='x')
 z = tf.placeholder(tf.float64, [None, z_dim], name='z')
 
@@ -446,7 +552,7 @@ ae_x, ae_g = tf.split(ae_out, [batch_size, gen_num])
 
 ae_loss = tf.reduce_mean(tf.square(ae_x - x))
 
-# SET UP MMD LOSS.
+# Set up MMD loss.
 mmd, exp_object = compute_mmd(enc_x, enc_g)
 d_loss = ae_loss - lambda_mmd * mmd
 g_loss = mmd
@@ -491,7 +597,10 @@ summary_op = tf.summary.merge([
     tf.summary.scalar("lr/lr", lr),
 ])
 
-# main()
+# END : Build Model.
+
+# BEGIN: Initialize Model.
+
 init_op = tf.global_variables_initializer()
 saver = tf.train.Saver()
 summary_writer = tf.summary.FileWriter(checkpoint_dir)
@@ -517,11 +626,11 @@ print save_tag
 
 # Set up cumulative output files.
 g_out_file = os.path.join(log_dir, 'g_out.txt')
-disclosure_risk_file = os.path.join(log_dir, 'disclosure_risk.txt')
-if os.path.isfile(g_out_file) and not load_existing:
-    os.remove(g_out_file)
-if os.path.isfile(disclosure_risk_file) and not load_existing:
-    os.remove(disclosure_risk_file)
+presence_risk_file = os.path.join(log_dir, 'presence_risk.txt')
+attribute_risk_file = os.path.join(log_dir, 'attribute_risk.txt')
+for fi in [g_out_file, presence_risk_file, attribute_risk_file]:
+    if os.path.isfile(fi) and not load_existing:
+        os.remove(fi)
 
 # Start time.
 start_time = time()
@@ -537,6 +646,11 @@ if load_existing:
         print(" [!] Load failed...")
 else:
     load_step = 0
+
+# END: Initialize Model.
+
+
+# BEGIN: Sample Existing Model. 
 
 if load_existing and sample_n:
     random_batch_data = np.array(
@@ -573,8 +687,11 @@ else:
     print('Training new model, and storing at checkpoint_dir:\n  {}.'.format(
         checkpoint_dir))
 
+# END: Sample Existing Model. 
 
-# train().
+
+# BEGIN: Train Model. 
+
 if int(raw_input('\nContinue? [0/1]: ')) != 1:
     sys.exit()
 for step in range(load_step, max_step):
@@ -623,11 +740,7 @@ for step in range(load_step, max_step):
 
         # Save generated data to NumPy file and to output collection.
         # NOTE: First un-norm, then round values in binary cols.
-        if standardize:
-            g_out = (g_ * std_vec + mean_vec)
-        else:
-            # Unnormalize.
-            g_out = g_ * np.max(train_raw_data, axis=0)
+        g_out = (g_ * std_vec + mean_vec)
 
         for i, row in enumerate(g_out):
             for col in binary_cols:
@@ -641,13 +754,25 @@ for step in range(load_step, max_step):
         with open(g_out_file, 'a') as gf:
             gf.write(str(g_out) + '\n')
 
-        # Print disclosure risk values.
-        sensitivity, precision, ball_radius, tp, fn, fp = evaluate_disclosure_risk(
-            train_raw_data, test_raw_data, g_out, ball_radius)
-        print('  sens={:.4f}, prec={:.4f}, br={}, tp={}, fn={}, fp={} '.format(
-            sensitivity, precision, ball_radius, tp, fn, fp))
-        with open(disclosure_risk_file, 'a') as df:
-            df.write(','.join(map(str, [sensitivity, precision])) + '\n')
+        # Print presence and attribute risk values.
+        sim_ = sess.run(g_read_only,
+            feed_dict={
+                z: get_random_z(num_test, z_dim)})
+        sim_full = (sim_ * std_vec + mean_vec)
+
+        p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
+            train_raw_data, test_raw_data, sim_full)
+        a_sens, a_prec, a_margin, a_tp, a_fn, a_fp = evaluate_attribute_risk(
+            train_raw_data, test_raw_data, sim_full, binary_cols)
+        with open(presence_risk_file, 'a') as pf:
+            pf.write(','.join(map(str, [p_sens, p_prec])) + '\n')
+        with open(attribute_risk_file, 'a') as af:
+            af.write(','.join(map(str, [a_sens, a_prec])) + '\n')
+        print('  Disclosure risk on {} from train'.format(len(test_raw_data)))
+        print('    PRES: sens={:.4f}, prec={:.4f}, pm={}, tp={}, fn={}, fp={} '.format(
+            p_sens, p_prec, p_margin, p_tp, p_fn, p_fp))
+        print('    ATTR: sens={:.4f}, prec={:.4f}, am={}, tp={}, fn={}, fp={} '.format(
+            a_sens, a_prec, a_margin, a_tp, a_fn, a_fp))
 
         # PLOTTING RESULTS.
         plot = 1
@@ -668,3 +793,4 @@ for step in range(load_step, max_step):
                    ' Total est.: {}').format(
                        elapsed_time, time_per_iter, total_est_str))
 
+# END: Train Model. 
