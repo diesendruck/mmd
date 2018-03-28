@@ -411,6 +411,7 @@ def build_model_mmd_gan(batch_size, gen_num, out_dim, z_dim):
 
 def main():
     args = parser.parse_args()
+    model_type = args.model_type
     data_num = args.data_num
     percent_train = args.percent_train
     batch_size = args.batch_size
@@ -430,12 +431,13 @@ def main():
     # Load data and prep dirs.
     data, data_test, data_num, out_dim = load_data(data_num, percent_train)
     log_dir, checkpoint_dir, plot_dir = prepare_dirs()
-    save_tag = 'dn{}_bs{}_gen{}_w{}_d{}_zd{}_lr{}_op_{}'.format(
-        data_num, batch_size, gen_num, width, depth, z_dim, learning_rate,
-        optimizer)
+    #save_tag = 'dn{}_bs{}_gen{}_w{}_d{}_zd{}_lr{}_op_{}'.format(
+    #    data_num, batch_size, gen_num, width, depth, z_dim, learning_rate,
+    #    optimizer)
+    save_tag = str(args)
     with open(os.path.join(log_dir, 'save_tag.txt'), 'w') as save_tag_file:
         save_tag_file.write(save_tag)
-    print(save_tag)
+    print('Save tag: {}'.format(save_tag))
 
     g_out_file = os.path.join(log_dir, 'g_out.txt')
     if os.path.isfile(g_out_file):
@@ -490,8 +492,6 @@ def main():
             ###################################################################
             # Occasionally log/plot results.
             if step % log_step == 0:
-                print(save_tag)
-
                 # Read off from graph.
                 if model_type == 'mmd_ae':
                     d_loss_, ae_loss_, mmd_, g_batch_, summary_result = sess.run(
@@ -546,9 +546,11 @@ def main():
                     m, s = divmod(total_est, 60)
                     h, m = divmod(m, 60)
                     total_est_str = '{:.0f}:{:02.0f}:{:02.0f}'.format(h, m, s)
-                    print ('  time (s): {:.2f}, time/iter: {:.4f},'
+                    print ('  Time (s): {:.2f}, time/iter: {:.4f},'
                             ' Total est.: {:.4f}').format(
                                 step, elapsed_time, time_per_iter, total_est_str)
+
+                    print('  Save tag: {}'.format(save_tag))
 
                 # Make scatter plots.
                 if out_dim > 2:
