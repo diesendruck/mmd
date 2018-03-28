@@ -17,8 +17,8 @@ parser.add_argument('--model_type', type=str, default='mmd_ae',
                     choices=['mmd_ae', 'mmd_gan'])
 parser.add_argument('--data_num', type=int, default=1000)
 parser.add_argument('--percent_train', type=float, default=0.9)
-parser.add_argument('--batch_size', type=int, default=64)
-parser.add_argument('--gen_num', type=int, default=64)
+parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--gen_num', type=int, default=200)
 parser.add_argument('--width', type=int, default=20,
                     help='width of generator layers')
 parser.add_argument('--depth', type=int, default=10,
