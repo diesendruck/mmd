@@ -275,12 +275,44 @@ def build_model_mmd_ae(batch_size, data_num, gen_num, out_dim, z_dim):
 
     ae_loss = tf.reduce_mean(tf.square(ae_x - x))
     mmd = compute_mmd(x, ae_x)
+
+    each_i = 1
+    if each_i:
+        # Build in differential privacy terms.
+        # 1. Compute MMD between original input and random subset of input.
+        # 2. Add this altered MMD to the original for all those MMDs.
+        # 3. Include loss on closeness/min distance from ae(x) to x.
+        mmd_subset = 0
+        for i in xrange(batch_size):
+            indices_to_keep = np.delete(np.arange(batch_size), i)
+            x_i = tf.gather(x, indices_to_keep) 
+            _, ae_x_i, _, _ = autoencoder(x_i,
+                width=width, depth=depth, activation=activation, z_dim=z_dim,
+                reuse=True)
+            mmd_i = compute_mmd(x, ae_x_i)
+            mmd_subset +=  mmd_i
+        mmd = 0. * mmd + mmd_subset
+    else:
+        batch_indices = range(batch_size)
+        pct_g1 = 0.5
+        indices_1 = np.random.choice(batch_indices, int(batch_size * pct_g1),
+            replace=False)
+        indices_2 = [i for i in batch_indices if i not in indices_1]
+        x_1 = tf.gather(x, indices_1) 
+        x_2 = tf.gather(x, indices_2) 
+        _, ae_x_1, _, _ = autoencoder(x_1, width=width, depth=depth,
+            activation=activation, z_dim=z_dim, reuse=True)
+        _, ae_x_2, _, _ = autoencoder(x_2, width=width, depth=depth,
+            activation=activation, z_dim=z_dim, reuse=True)
+        mmd_1 = compute_mmd(x, ae_x_1)
+        mmd_2 = compute_mmd(x, ae_x_2)
+        lambda_mmd = 1.0
+        lambda_mmd_i = 1.0
+        mmd = lambda_mmd * mmd + lambda_mmd_i * (mmd_1 + mmd_2)
+
+    d_loss = mmd
     g = ae_x
     g_full = ae_x_full
-
-    lambda_ae_loss = 0.0
-    d_loss = lambda_ae_loss * ae_loss + mmd
-
 
     if optimizer == 'adagrad':
         d_opt = tf.train.AdagradOptimizer(learning_rate)
@@ -378,8 +410,6 @@ def build_model_mmd_gan(batch_size, gen_num, out_dim, z_dim):
 
 
 def main():
-    # TODO: Adjust "width" and "depth" so they don't collide with model names.
-    print('TODO: Sort why flags cause generation script to fail.')
     args = parser.parse_args()
     data_num = args.data_num
     percent_train = args.percent_train
