@@ -19,7 +19,7 @@ from scipy.stats import pearsonr
 # Config.
 parser = argparse.ArgumentParser()
 parser.add_argument('--data_num', type=int, default=1000)
-parser.add_argument('--train_percent', type=float, default=0.9)
+parser.add_argument('--percent_train', type=float, default=0.9)
 parser.add_argument('--batch_size', type=int, default=1000)
 parser.add_argument('--gen_num', type=int, default=1000)
 parser.add_argument('--z_dim', type=int, default=64)
@@ -44,7 +44,7 @@ parser.add_argument('--plot_sparse', action='store_true', default=False)
 
 args = parser.parse_args()
 data_num = args.data_num
-train_percent = args.train_percent
+percent_train = args.percent_train
 batch_size = args.batch_size
 gen_num = args.gen_num
 z_dim = args.z_dim
@@ -96,13 +96,6 @@ def build_toy_data():
         [10., -10., 6., 0., 15], np.eye(d), n3)
     data = np.concatenate((cluster1, cluster2, cluster3, cluster4))
     return data
-    #n1 = data_num / 2
-    #n2 = data_num - n1
-    #cluster1 = np.random.multivariate_normal(
-    #    [-2., 5.], [[1., .9], [.9, 1.]], n1)
-    #cluster2 = np.random.multivariate_normal(
-    #    [6., 6.], [[1., 0.], [0., 1.]], n2)
-    #data = np.concatenate((cluster1, cluster2))
 
 
 def get_random_z(gen_num, z_dim):
@@ -229,12 +222,12 @@ def compute_mmd(enc_x, enc_g, use_tf=True):
         return mmd, exp_object
 
 
-def plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
+def plot_marginals(raw_data_train, data, batch_size, step, g_, g_out, log_dir,
         filename_tag=None, plot_sparse=False):
     """Plots all marginals, and computes MMDs between marginals of real and sim.
 
     Args:
-      train_raw_data: Numpy array, un-standardized data. 
+      raw_data_train: Numpy array, un-standardized data. 
       data: Numpy array, standardized data. 
       batch_size: Int, batch_size for MMD computation. 
       step: Int, used for logging. 
@@ -248,7 +241,7 @@ def plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
         [data[i] for i in np.random.choice(len(data), batch_size)])
     random_batch_gen = np.array(
         [g_[i] for i in np.random.choice(len(g_), batch_size)])
-    num_cols = train_raw_data.shape[1]
+    num_cols = raw_data_train.shape[1]
     sq_dim = int(np.ceil(np.sqrt(num_cols)))
     fig, axs = plt.subplots(sq_dim, sq_dim, figsize=(20, 20))
     if not plot_sparse:
@@ -261,7 +254,7 @@ def plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
     for i in range(num_cols):
         mmd_i_data_gen, _ = compute_mmd(
             random_batch_data[:, i], random_batch_gen[:, i], use_tf=False)
-        plot_d = train_raw_data[:, i]
+        plot_d = raw_data_train[:, i]
         plot_g = g_out[:, i]
         axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
         axs[i].hist(plot_g, normed=True, alpha=0.3, label='g', bins=bins)
@@ -281,15 +274,15 @@ def plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
     plt.close('all')
 
 
-def plot_correlations(train_raw_data, step, g_out, log_dir):
-    num_cols = train_raw_data.shape[1]
+def plot_correlations(raw_data_train, step, g_out, log_dir):
+    num_cols = raw_data_train.shape[1]
     corr_coefs_data = np.zeros((num_cols, num_cols))
     corr_coefs_gens = np.zeros((num_cols, num_cols))
     for i in range(num_cols):
         for j in range(num_cols):
             if j > i:
                 corr_coefs_data[i][j], _ = pearsonr(
-                        train_raw_data[:, i], train_raw_data[:, j])
+                        raw_data_train[:, i], raw_data_train[:, j])
                 corr_coefs_gens[i][j], _ = pearsonr(
                         g_out[:, i], g_out[:, j])
     coefs_d = corr_coefs_data.flatten()
@@ -325,7 +318,7 @@ def evaluate_presence_risk(all_train, test, sim):
       precision: Float of TP / (TP + FP).
     """
     # Constants.
-    presence_margin = 10. 
+    presence_margin = 15. 
 
     assert len(test) < len(all_train), 'test should be smaller than train'
     num_samples = len(test)
@@ -378,9 +371,9 @@ def evaluate_attribute_risk(all_train, test, sim, binary_cols):
       precision: Float of TP / (TP + FP).
     """
     # Constants.
-    k = 10
-    attribute_margin = 0.01
-    pct_attributes_known = 0.1
+    k = 5 
+    attribute_margin = 0.05
+    pct_attributes_known = 0.5
 
     assert len(test) < len(all_train), 'test should be smaller than train'
     num_compromised = test.shape[0]
@@ -482,6 +475,59 @@ def prepare_dirs():
     return log_dir, checkpoint_dir
 
 
+def evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
+        raw_data_train, raw_data_test, raw_data_eval, binary_cols,
+        presence_risk_file, attribute_risk_file, temp=False):
+    if temp:
+        presence_risk_file = os.path.join(log_dir, 'presence_risk_temp.txt')
+        attribute_risk_file = os.path.join(log_dir, 'attribute_risk_temp.txt')
+        num_samples = 10
+        print('Taking {} samples of presence and attribute risks...'.format(
+            num_samples))
+        for i in xrange(num_samples):
+            sim_ = sess.run(g_read_only,
+                feed_dict={
+                    z: get_random_z(num_test, z_dim)})
+            sim_full = (sim_ * std_vec + mean_vec)
+            random_sample_eval = np.array(
+                [raw_data_eval[d] for d in np.random.choice(
+                    len(raw_data_eval), len(raw_data_eval))])
+            sim_full = random_sample_eval 
+
+            p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
+                raw_data_train, raw_data_test, sim_full)
+            a_sens, a_prec, a_margin, a_tp, a_fn, a_fp = evaluate_attribute_risk(
+                raw_data_train, raw_data_test, sim_full, binary_cols)
+            with open(presence_risk_file, 'a') as pf:
+                pf.write(','.join(map(str, [p_sens, p_prec])) + '\n')
+            with open(attribute_risk_file, 'a') as af:
+                af.write(','.join(map(str, [a_sens, a_prec])) + '\n')
+            print('Got sample {}.'.format(i))
+
+        os.system('python evaluate_disclosure_risks.py --tag="{}" --temp'.format(tag))
+
+    else:
+        sim_ = sess.run(g_read_only,
+            feed_dict={
+                z: get_random_z(num_test, z_dim)})
+        sim_full = (sim_ * std_vec + mean_vec)
+
+        p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
+            raw_data_train, raw_data_test, sim_full)
+        a_sens, a_prec, a_margin, a_tp, a_fn, a_fp = evaluate_attribute_risk(
+            raw_data_train, raw_data_test, sim_full, binary_cols)
+        with open(presence_risk_file, 'a') as pf:
+            pf.write(','.join(map(str, [p_sens, p_prec])) + '\n')
+        with open(attribute_risk_file, 'a') as af:
+            af.write(','.join(map(str, [a_sens, a_prec])) + '\n')
+
+        print('  Disclosure risk on {} from train'.format(len(raw_data_test)))
+        print('    Pres: sens={:.4f}, prec={:.4f}, pm={}, tp={}, fn={}, fp={} '.format(
+            p_sens, p_prec, p_margin, p_tp, p_fn, p_fp))
+        print('    Attr: sens={:.4f}, prec={:.4f}, am={}, tp={}, fn={}, fp={} '.format(
+            a_sens, a_prec, a_margin, a_tp, a_fn, a_fp))
+
+
 ###############################################################################
 
 # BEGIN: Data Preparation.
@@ -492,18 +538,22 @@ log_dir, checkpoint_dir = prepare_dirs()
 # load_data().
 if data_file:
     orig_raw_data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    num_rows = orig_raw_data.shape[0]
     num_cols = orig_raw_data.shape[1]
 
     # Separate train and test data.
-    num_train = int(train_percent * orig_raw_data.shape[0])
-    train_raw_data = orig_raw_data[:num_train]
-    test_raw_data = orig_raw_data[num_train:]
-    num_test = len(test_raw_data)
+    num_train = int(percent_train * num_rows)
+    num_test_and_eval = num_rows - num_train
+    num_test = num_test_and_eval / 2
+    num_eval = num_test_and_eval - num_test
+    raw_data_train = orig_raw_data[:num_train]
+    raw_data_test = orig_raw_data[num_train: num_train + num_test]
+    raw_data_eval = orig_raw_data[-num_eval:]
 
     print('\nRaw data:')
     for i in range(num_cols):
         print('{: >17},{: >17},{: >17},{: >17},{: >17}'.format(
-            *fivenum(train_raw_data[:,i])))
+            *fivenum(raw_data_train[:,i])))
 
     binary_cols = []
     for col in range(num_cols):
@@ -516,9 +566,9 @@ if data_file:
     mean_mask = np.array([1] * num_cols)
     mean_mask[binary_cols] = 0  
     std_mask = np.array([1] * num_cols) 
-    mean_vec = train_raw_data.mean(0) * mean_mask
-    std_vec = train_raw_data.std(0) * std_mask
-    data = (train_raw_data - mean_vec) / std_vec 
+    mean_vec = raw_data_train.mean(0) * mean_mask
+    std_vec = raw_data_train.std(0) * std_mask
+    data = (raw_data_train - mean_vec) / std_vec 
 
     print('\nStandardized data:')
     for i in range(data.shape[1]):
@@ -674,8 +724,14 @@ if load_existing and sample_n:
     np.savetxt(out_name + '.csv', g_out, delimiter=',')
     print('Saved npy and csv of:\n{}'.format(out_name))
 
-    plot_marginals(train_raw_data, data, batch_size, step, g_, g_out, log_dir,
+    plot_marginals(raw_data_train, data, batch_size, step, g_, g_out, log_dir,
         filename_tag='sample_{}'.format(sample_n), plot_sparse=plot_sparse)
+
+    # Evaluate disclosure risks for existing model.
+    evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
+        raw_data_train, raw_data_test, raw_data_eval, binary_cols,
+        presence_risk_file, attribute_risk_file, temp=True)
+
     # If only sampling from existing model, exit before training.
     sys.exit('Finished sampling n.')
 
@@ -755,31 +811,16 @@ for step in range(load_step, max_step):
             gf.write(str(g_out) + '\n')
 
         # Print presence and attribute risk values.
-        sim_ = sess.run(g_read_only,
-            feed_dict={
-                z: get_random_z(num_test, z_dim)})
-        sim_full = (sim_ * std_vec + mean_vec)
-
-        p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
-            train_raw_data, test_raw_data, sim_full)
-        a_sens, a_prec, a_margin, a_tp, a_fn, a_fp = evaluate_attribute_risk(
-            train_raw_data, test_raw_data, sim_full, binary_cols)
-        with open(presence_risk_file, 'a') as pf:
-            pf.write(','.join(map(str, [p_sens, p_prec])) + '\n')
-        with open(attribute_risk_file, 'a') as af:
-            af.write(','.join(map(str, [a_sens, a_prec])) + '\n')
-        print('  Disclosure risk on {} from train'.format(len(test_raw_data)))
-        print('    PRES: sens={:.4f}, prec={:.4f}, pm={}, tp={}, fn={}, fp={} '.format(
-            p_sens, p_prec, p_margin, p_tp, p_fn, p_fp))
-        print('    ATTR: sens={:.4f}, prec={:.4f}, am={}, tp={}, fn={}, fp={} '.format(
-            a_sens, a_prec, a_margin, a_tp, a_fn, a_fp))
+        evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec,
+            mean_vec, raw_data_train, raw_data_test, raw_data_eval, binary_cols,
+            presence_risk_file, attribute_risk_file)
 
         # PLOTTING RESULTS.
         plot = 1
         if plot:
-            plot_marginals(train_raw_data, data, batch_size, step, g_, g_out,
+            plot_marginals(raw_data_train, data, batch_size, step, g_, g_out,
                 log_dir, plot_sparse=plot_sparse)
-            plot_correlations(train_raw_data, step, g_out, log_dir)
+            plot_correlations(raw_data_train, step, g_out, log_dir)
 
         # Print time performance.
         if step % log_step == 0 and step > 0:
