@@ -489,10 +489,11 @@ def evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
                 feed_dict={
                     z: get_random_z(num_test, z_dim)})
             sim_full = (sim_ * std_vec + mean_vec)
-            random_sample_eval = np.array(
-                [raw_data_eval[d] for d in np.random.choice(
-                    len(raw_data_eval), len(raw_data_eval))])
-            sim_full = random_sample_eval 
+            # Swap sim_full for eval data to test risks on heldout data.
+            #random_sample_eval = np.array(
+            #    [raw_data_eval[d] for d in np.random.choice(
+            #        len(raw_data_eval), len(raw_data_eval))])
+            #sim_full = random_sample_eval 
 
             p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
                 raw_data_train, raw_data_test, sim_full)
