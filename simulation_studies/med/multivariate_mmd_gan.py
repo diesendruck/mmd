@@ -243,14 +243,14 @@ def plot_marginals(raw_data_train, data, batch_size, step, g_, g_out, log_dir,
         [g_[i] for i in np.random.choice(len(g_), batch_size)])
     num_cols = raw_data_train.shape[1]
     sq_dim = int(np.ceil(np.sqrt(num_cols)))
-    fig, axs = plt.subplots(sq_dim, sq_dim, figsize=(20, 20))
+    fig, axs = plt.subplots(sq_dim, sq_dim, figsize=(30, 30))
     if not plot_sparse:
         fig.subplots_adjust(hspace=0.5, wspace=0.5)
         fig.suptitle('Marginals, it{}'.format(step))
     else:
         fig.subplots_adjust(hspace=0.05, wspace=0.05)
     axs = axs.ravel()
-    bins = 30
+    bins = 40
     for i in range(num_cols):
         mmd_i_data_gen, _ = compute_mmd(
             random_batch_data[:, i], random_batch_gen[:, i], use_tf=False)
@@ -318,7 +318,7 @@ def evaluate_presence_risk(all_train, test, sim):
       precision: Float of TP / (TP + FP).
     """
     # Constants.
-    presence_margin = 15. 
+    presence_margin = 40. 
 
     assert len(test) < len(all_train), 'test should be smaller than train'
     num_samples = len(test)
@@ -522,12 +522,22 @@ def evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
         with open(attribute_risk_file, 'a') as af:
             af.write(','.join(map(str, [a_sens, a_prec])) + '\n')
 
-        print('  Disclosure risk on {} from train'.format(len(raw_data_test)))
+        print('  Disclosure risk on {} from TRAIN'.format(len(raw_data_test)))
         print('    Pres: sens={:.4f}, prec={:.4f}, pm={}, tp={}, fn={}, fp={} '.format(
             p_sens, p_prec, p_margin, p_tp, p_fn, p_fp))
         print('    Attr: sens={:.4f}, prec={:.4f}, am={}, tp={}, fn={}, fp={} '.format(
             a_sens, a_prec, a_margin, a_tp, a_fn, a_fp))
 
+        # Do the same for heldout eval data, instead of sim.
+        #p_sens, p_prec, p_margin, p_tp, p_fn, p_fp = evaluate_presence_risk(
+        #    raw_data_train, raw_data_test, raw_data_eval)
+        #a_sens, a_prec, a_margin, a_tp, a_fn, a_fp = evaluate_attribute_risk(
+        #    raw_data_train, raw_data_test, raw_data_eval, binary_cols)
+        #print('  Disclosure risk on {} from EVAL'.format(len(raw_data_eval)))
+        #print('    Pres: sens={:.4f}, prec={:.4f}, pm={}, tp={}, fn={}, fp={} '.format(
+        #    p_sens, p_prec, p_margin, p_tp, p_fn, p_fp))
+        #print('    Attr: sens={:.4f}, prec={:.4f}, am={}, tp={}, fn={}, fp={} '.format(
+        #    a_sens, a_prec, a_margin, a_tp, a_fn, a_fp))
 
 ###############################################################################
 
@@ -539,8 +549,19 @@ log_dir, checkpoint_dir = prepare_dirs()
 # load_data().
 if data_file:
     orig_raw_data = np.loadtxt(open(data_file, 'rb'), delimiter=',')
+    # Remove weird outlier. Probably a measurement/input error.
+    orig_raw_data = np.delete(orig_raw_data, 226, axis=0)
+    orig_raw_data = np.random.permutation(orig_raw_data)
     num_rows = orig_raw_data.shape[0]
     num_cols = orig_raw_data.shape[1]
+
+    # Get numberr of decimals for each col. Simulations will round accordingly.
+    num_decimals_per_col = []
+    def num_decimals(n):
+        return int(str(n)[::-1].find('.'))
+    for i in range(num_cols):
+        num_dec = int(np.max([num_decimals(d) for d in orig_raw_data[:, i]]))
+        num_decimals_per_col.append(num_dec)
 
     # Separate train and test data.
     num_train = int(percent_train * num_rows)
@@ -725,13 +746,13 @@ if load_existing and sample_n:
     np.savetxt(out_name + '.csv', g_out, delimiter=',')
     print('Saved npy and csv of:\n{}'.format(out_name))
 
-    plot_marginals(raw_data_train, data, batch_size, step, g_, g_out, log_dir,
+    plot_marginals(raw_data_train, data, batch_size, load_step, g_, g_out, log_dir,
         filename_tag='sample_{}'.format(sample_n), plot_sparse=plot_sparse)
 
     # Evaluate disclosure risks for existing model.
-    evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
-        raw_data_train, raw_data_test, raw_data_eval, binary_cols,
-        presence_risk_file, attribute_risk_file, temp=True)
+    #evaluate_disclosure_risks(g_read_only, num_test, z_dim, std_vec, mean_vec,
+    #    raw_data_train, raw_data_test, raw_data_eval, binary_cols,
+    #    presence_risk_file, attribute_risk_file, temp=True)
 
     # If only sampling from existing model, exit before training.
     sys.exit('Finished sampling n.')
@@ -796,9 +817,9 @@ for step in range(load_step, max_step):
                 lambda_mmd * mmd_, mmd_))
 
         # Save generated data to NumPy file and to output collection.
-        # NOTE: First un-norm, then round values in binary cols.
+        # First un-norm.
         g_out = (g_ * std_vec + mean_vec)
-
+        # Second, round values in binary cols.
         for i, row in enumerate(g_out):
             for col in binary_cols:
                 if row[col] < 0.5:
@@ -806,6 +827,11 @@ for step in range(load_step, max_step):
                 else:
                     row[col] = 1.0
             g_out[i] = row
+        # Third, round values to same number of decimals as data.
+        for c in range(num_cols):
+            g_out[:, c] = np.round(g_out[:, c], num_decimals_per_col[c])
+            #g_out[:, c] = np.round(g_out[:, c], 2)
+
         np.save(os.path.join(log_dir, 'g_out.npy'), g_out)
         np.savetxt(os.path.join(log_dir, 'g_out.csv'), g_out, delimiter=',')
         with open(g_out_file, 'a') as gf:
