@@ -210,7 +210,6 @@ def load_data(data_num, percent_train):
         out_dim = data.shape[1]
         return data, data_test, data_num, data_test_num, out_dim
     else:
-        # With Bern(0.5) pick a Gaussian, then generate from that Gaussian.
         def sample_c1():
             sample = np.random.multivariate_normal(
                 [-2., 5.], [[1., .6], [.6, 1.]], 1)
@@ -221,21 +220,14 @@ def load_data(data_num, percent_train):
             return sample
         data_raw = np.zeros((data_num, 2))
         for i in range(data_num):
-            #cluster_i = np.random.binomial(1, 0.5)
-            cluster_i = 0  # NOTE: FIXING TO ONE CLUSTER.
+            # Pick a Gaussian, then generate from that Gaussian.
+            cluster_i = np.random.binomial(1, 0.0)  # NOTE: p=0.
             if cluster_i == 0:
                 s = sample_c1()
                 data_raw[i] = s
             else:
                 s = sample_c2()
                 data_raw[i] = s
-
-        #n1 = data_num / 2
-        #n2 = data_num - n1
-        #cluster2 = np.random.multivariate_normal(
-        #    [6., 6.], [[1., 0.], [0., 1.]], n2)
-        #data_raw = np.concatenate((cluster1, cluster2))
-        #data_raw = np.random.permutation(data_raw)
 
         num_train = int(percent_train * data_raw.shape[0])
         data = data_raw[:num_train]
@@ -529,9 +521,6 @@ def main():
     data, data_test, data_num, data_test_num, out_dim = load_data(
         data_num, percent_train)
     log_dir, checkpoint_dir, plot_dir = prepare_dirs()
-    #save_tag = 'dn{}_bs{}_gen{}_w{}_d{}_zd{}_lr{}_op_{}'.format(
-    #    data_num, batch_size, gen_num, width, depth, z_dim, learning_rate,
-    #    optimizer)
     save_tag = str(args)
     with open(os.path.join(log_dir, 'save_tag.txt'), 'w') as save_tag_file:
         save_tag_file.write(save_tag)
@@ -540,6 +529,11 @@ def main():
     g_out_file = os.path.join(log_dir, 'g_out.txt')
     if os.path.isfile(g_out_file):
         os.remove(g_out_file)
+
+    # Compute sample mean and covariance, if using Gaussian data.
+    if data_file == '':
+        sample_mean = np.mean(data, axis=0)
+        sample_cov = np.cov(data.T)
 
     # Build model.
     if model_type == 'mmd_ae':
@@ -646,9 +640,15 @@ def main():
                     ll_both = 0.5 * sample_loglik(c1_mean, c1_cov, both)
                     ll_ratio_gen = ll_gen / ll_data
                     ll_ratio_both = ll_both / ll_data
+                    both_mean = np.mean(both, axis=0)
+                    both_cov = np.cov(both.T)
                     print(('  ll_gen = {:.4f}, ll_data = {:.4f}, ratio(g/d) = '
-                           '{:.4f}, ratio(b/d) = {:.4f}').format(
+                        '{:.4f}, ratio(b/d) = {:.4f}').format(
                                 ll_gen, ll_data, ll_ratio_gen, ll_ratio_both))
+                    print('Union: ', both_mean)
+                    print('Sample: ',sample_mean)
+                    print('Union: ', both_cov)
+                    print('Sample: ',sample_cov)
 
                 # Compute disclosure risk.
                 sensitivity, precision, ball_radius = evaluate_presence_risk(
