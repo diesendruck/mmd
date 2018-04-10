@@ -252,8 +252,11 @@ def plot_marginals(raw_data_train, data, batch_size, step, g_, g_out, log_dir,
     axs = axs.ravel()
     bins = 40
     for i in range(num_cols):
+        # For each marginal, compute mmd between normalized data and
+        # normalized simulations.
         mmd_i_data_gen, _ = compute_mmd(
             random_batch_data[:, i], random_batch_gen[:, i], use_tf=False)
+        # For each marginal, plot unnormalized data and unnormalized simulations.
         plot_d = raw_data_train[:, i]
         plot_g = g_out[:, i]
         axs[i].hist(plot_d, normed=True, alpha=0.3, label='d', bins=bins)
@@ -560,7 +563,8 @@ if data_file:
     def num_decimals(n):
         return int(str(n)[::-1].find('.'))
     for i in range(num_cols):
-        num_dec = int(np.max([num_decimals(d) for d in orig_raw_data[:, i]]))
+        # TODO: Determine appropriate rounding convention, e.g. {min, max, med}?
+        num_dec = int(np.max([num_decimals(d) for d in orig_raw_data[:, i]]))  
         num_decimals_per_col.append(num_dec)
 
     # Separate train and test data.
