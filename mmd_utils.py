@@ -25,8 +25,8 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
         K_xy = K[:n1, n1:]
         K_xx_upper = tf.matrix_band_part(K_xx, 0, -1)
         K_yy_upper = tf.matrix_band_part(K_yy, 0, -1)
-        num_combos_x = tf.to_float(n1 * (n1 - 1) / 2))
-        num_combos_y = tf.to_float(n2 * (n2 - 1) / 2))
+        num_combos_x = tf.to_float(n1 * (n1 - 1) / 2)
+        num_combos_y = tf.to_float(n2 * (n2 - 1) / 2)
         num_combos_xy = tf.to_float(n1 * n2)
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
                tf.reduce_sum(K_yy_upper) / num_combos_y -
