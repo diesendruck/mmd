@@ -130,6 +130,9 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
 
 
         # TODO: FIGURE OUT WHICH K TO USE.
+        # See slide 47, showing that kernel uses eigenvalue, too. Add it.
+        # http://mlss.tuebingen.mpg.de/2015/slides/gretton/part_1.pdf
+       
         # Construct polynomial representation of kernel, i.e. result of inner
         # product of first k bases.
         options = ['just_hermite', 'eigenfn']
