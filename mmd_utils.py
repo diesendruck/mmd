@@ -143,6 +143,7 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
             K = polynomial_probabilist
 
         elif option == 'eigenfn':
+            # See p.2 of kmmd_with_eigenfunctions.pdf for derivation.
             eigenfn_poly = 5. + 4.*(const2**2)*VVT + 16.*(const2**4)*VVT_sq - \
                 8.*(const2**2)*v_sq_tiled - 8.*(const2**2)*v_sq_tiled_T
             eigenfn_exp = -1. * const1 * (v_sq_tiled - v_sq_tiled_T)
