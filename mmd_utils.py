@@ -3,6 +3,17 @@ import numpy as np
 import tensorflow as tf
 
 
+# See Rasmussen (4.40) for source of symbols.
+# http://www.gaussianprocess.org/gpml/chapters/RW.pdf
+kernel_sigma = 1.
+kernel_l = 1.
+basis_a = 1. / (4. * kernel_sigma**2)
+basis_b = 1. / (2. * kernel_l**2)
+basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
+const1 = basis_c - basis_a
+const2 = np.sqrt(2. * basis_c)
+
+
 def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
     """Computes mmd between two numpy arrays of same size."""
     if sigma_list is None:
@@ -60,18 +71,13 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
 
 
 def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
-    """Computes 2-mmd between two numpy arrays of same size.
+    """Computes k-mmd^2 between two numpy arrays of same size.
     
     The projection of a distribution into the RKHS defined by the Gaussian
-    kernel, is equivalent to the inner product of an infinite-dimension Hermite
-    polynomial basis. Truncating this basis involves using only the first k
-    Hermite polynomials in the inner product. For the Gaussian kernel, the
-    first bases are: H_0 = 1, H_1 = x, H_2 = x^2 - 1, such that the kernel
-    is as follows:
-      k(x, y) = (1 * 1) + (x * y) + ((x^2 - 1) * (y^2 - 1))
-              = 2 + xy + x^2 * y^2 - x^2 - y^2.
-    The MMD^2 estimator then sums these kernel values over all unique pairs
-    in the given arrays.
+    kernel, is equivalent to the inner product of eigenfunctions containing
+    Hermite polynomials. Truncating this basis of eigenfunctions, by computing 
+    an inner product over only the first k, (ideally) satisfies the goals
+    of k-mmd.
     """
     if sigma_list is None:
         sigma_list = [1.0]
@@ -110,48 +116,43 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
             arr1 = np.reshape(arr1, [-1, 1])
             arr2 = np.reshape(arr2, [-1, 1])
 
+        # Stack inputs, and create outer product, giving pairwise elements.
         v = np.concatenate((arr1, arr2), 0)
-        VVT = np.matmul(v, np.transpose(v))  # Outer product.
+        VVT = np.matmul(v, np.transpose(v))
         v_sq = v ** 2 
-        VVT_sq = np.matmul(v_sq, np.transpose(v_sq))  # Outer product.
+        VVT_sq = np.matmul(v_sq, np.transpose(v_sq))
 
+        # Tiling facilitates addition of squared terms (in 1st and 2nd
+        # positions of the kernel, e.g. +x^2 or +y^2.
         v_sq_tiled = np.tile(v_sq, [1, v_sq.shape[0]])
+        v_sq_tiled_T = np.transpose(v_sq_tiled)
 
-        # Construct polynomial kernel as inner product of up-to-k=2 Hermite 
-        # polynomial bases.
-        polynomial_object = 2. + VVT + VVT_sq - v_sq_tiled - \
-            np.transpose(v_sq_tiled)  
-        K = polynomial_object
+
+
+        # TODO: FIGURE OUT WHICH K TO USE.
+        # Construct polynomial representation of kernel, i.e. result of inner
+        # product of first k bases.
+        options = ['just_hermite', 'eigenfn']
+        option = options[0]
+
+        if option == 'just_hermite':
+            polynomial_probabilist = \
+                2. + VVT + VVT_sq - v_sq_tiled - v_sq_tiled_T  
+            polynomial_physicist = \
+                5. + 4.*VVT + 16.*VVT_sq - 8.*v_sq_tiled - 8.*v_sq_tiled_T
+            K = polynomial_probabilist
+
+        elif option == 'eigenfn':
+            eigenfn_poly = 5. + 4.*(const2**2)*VVT + 16.*(const2**4)*VVT_sq - \
+                8.*(const2**2)*v_sq_tiled - 8.*(const2**2)*v_sq_tiled_T
+            eigenfn_exp = -1. * const1 * (v_sq_tiled - v_sq_tiled_T)
+            K = eigenfn_poly * np.exp(eigenfn_exp) 
+
+
+
         K_xx = K[:n1, :n1]
         K_yy = K[n1:, n1:]
         K_xy = K[:n1, n1:]
-
-        # More explicit version.
-        """
-        x = arr1
-        y = arr2
-        K_xx = (2. + 
-            x * np.transpose(x) +
-            x**2 * np.transpose(x**2) -
-            np.tile(x**2, [1, n1]) -
-            np.transpose(np.tile(x**2, [1, n1])))
-        K_yy = (2. + 
-            y * np.transpose(y) +
-            y**2 * np.transpose(y**2) -
-            np.tile(y**2, [1, n2]) -
-            np.transpose(np.tile(y**2, [1, n2])))
-        K_xy = (2. +
-            x * np.transpose(y) +
-            x**2 * np.transpose(y**2) -
-            np.tile(x**2, [1, n2]) -
-            np.transpose(np.tile(y**2, [1, n1])))
-        xx_test = (K_xx_ == K_xx).all()
-        yy_test = (K_yy_ == K_yy).all()
-        xy_test = (K_xy_ == K_xy).all()
-        if not np.array([xx_test, yy_test, xy_test]).all():
-            pdb.set_trace()
-        """
-
         K_xx_upper = np.triu(K_xx)
         K_yy_upper = np.triu(K_yy)
         num_combos_x = n1 * (n1 - 1) / 2
@@ -159,4 +160,4 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
         kmmd = (np.sum(K_xx_upper) / num_combos_x +
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
-        return kmmd, polynomial_object
+        return kmmd, K 

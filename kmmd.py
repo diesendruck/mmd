@@ -21,14 +21,14 @@ def get_mmds(sample_size):
     return mmds_norm_gamma, kmmds_norm_gamma, kmmds_norm_norm
 
 
-for sample_size in [50, 100, 500]:
+for sample_size in [2, 100, 200]:
     mmds_norm_gamma, kmmds_norm_gamma, kmmds_norm_norm = \
         get_mmds(sample_size)
     print
     print(('mmd_norm_gamma:  {:.2f}, {:.2f}\n'
            'kmmd_norm_gamma: {:.2f}, {:.2f}\n'
            'kmmd_norm_norm:  {:.2f}, {:.2f}').format(
-        np.median(mmds_norm_gamma), np.var(mmds_norm_gamma),
-        np.median(kmmds_norm_gamma), np.var(kmmds_norm_gamma),
-        np.median(kmmds_norm_norm), np.var(kmmds_norm_norm)))
+        np.median(mmds_norm_gamma), np.std(mmds_norm_gamma),
+        np.median(kmmds_norm_gamma), np.std(kmmds_norm_gamma),
+        np.median(kmmds_norm_norm), np.std(kmmds_norm_norm)))
 pdb.set_trace()
