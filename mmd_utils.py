@@ -3,16 +3,6 @@ import numpy as np
 import tensorflow as tf
 
 
-# See Rasmussen (4.40) for source of symbols.
-# http://www.gaussianprocess.org/gpml/chapters/RW.pdf
-kernel_sigma = 1.
-kernel_l = 1.
-basis_a = 1. / (4. * kernel_sigma**2)
-basis_b = 1. / (2. * kernel_l**2)
-basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
-const1 = basis_c - basis_a
-const2 = np.sqrt(2. * basis_c)
-
 
 def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
     """Computes mmd between two numpy arrays of same size."""
@@ -79,6 +69,16 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
     an inner product over only the first k, (ideally) satisfies the goals
     of k-mmd.
     """
+    # Constants used in Hermite polynomials. See Rasmussen (4.40).
+    # http://www.gaussianprocess.org/gpml/chapters/RW.pdf
+    kernel_sigma = 1.
+    kernel_l = 1.
+    basis_a = 1. / (4. * kernel_sigma**2)
+    basis_b = 1. / (2. * kernel_l**2)
+    basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
+    const1 = basis_c - basis_a
+    const2 = np.sqrt(2. * basis_c)
+
     if sigma_list is None:
         sigma_list = [1.0]
 
@@ -130,27 +130,50 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
 
 
         # TODO: FIGURE OUT WHICH K TO USE.
-        # See slide 47, showing that kernel uses eigenvalue, too. Add it.
-        # http://mlss.tuebingen.mpg.de/2015/slides/gretton/part_1.pdf
-       
         # Construct polynomial representation of kernel, i.e. result of inner
         # product of first k bases.
-        options = ['just_hermite', 'eigenfn']
-        option = options[0]
+        options = ['hermite', 'eigenfn', 'polynomial_kernel']
+        option = options[2]
 
-        if option == 'just_hermite':
-            polynomial_probabilist = \
+        if option == 'hermite':
+            # This is probably incorrect, since it needs the eigenvals.
+            hermite_probabilist = \
                 2. + VVT + VVT_sq - v_sq_tiled - v_sq_tiled_T  
-            polynomial_physicist = \
+            hermite_physicist = \
                 5. + 4.*VVT + 16.*VVT_sq - 8.*v_sq_tiled - 8.*v_sq_tiled_T
-            K = polynomial_probabilist
+            K = hermite_probabilist
 
         elif option == 'eigenfn':
-            # See p.2 of kmmd_with_eigenfunctions.pdf for derivation.
+            # See slide 47, showing that kernel uses eigenvalue, too. Add it.
+            # http://mlss.tuebingen.mpg.de/2015/slides/gretton/part_1.pdf
+            # Below, eigenfn derivation. See p.2, kmmd_with_eigenfunctions.pdf.
             eigenfn_poly = 5. + 4.*(const2**2)*VVT + 16.*(const2**4)*VVT_sq - \
                 8.*(const2**2)*v_sq_tiled - 8.*(const2**2)*v_sq_tiled_T
             eigenfn_exp = -1. * const1 * (v_sq_tiled - v_sq_tiled_T)
             K = eigenfn_poly * np.exp(eigenfn_exp) 
+
+        elif option == 'polynomial_kernel':
+            num_moments = 2
+            c = 0.
+            if 0:
+                K = np.power(VVT + c, num_moments)
+                K = np.exp(-1. * K)
+            elif 1:
+                K = np.power(1e0 * VVT + c, num_moments)
+
+            verbose = 0
+            if verbose:
+                K0 = np.power(VVT + c, num_moments)
+                K1 = np.exp(np.power(VVT + c, num_moments))
+                K2 = -1. * np.power(VVT + c, num_moments)
+                K3 = np.exp(-1. * np.power(VVT + c, num_moments))
+                K4 = np.power(1e-1 * VVT + c, num_moments)
+                print(np.min(K0), np.max(K0))
+                print(np.min(K1), np.max(K1))
+                print(np.min(K2), np.max(K2))
+                print(np.min(K3), np.max(K3))
+                print(np.min(K4), np.max(K4))
+                pdb.set_trace()
 
 
 
