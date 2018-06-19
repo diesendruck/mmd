@@ -1,10 +1,11 @@
+import math
 import pdb
 import numpy as np
 import tensorflow as tf
 
 
 
-def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
+def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
     """Computes mmd between two numpy arrays of same size."""
     if sigma_list is None:
         sigma_list = [1.0]
@@ -33,7 +34,11 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
                tf.reduce_sum(K_yy_upper) / num_combos_y -
                2 * tf.reduce_sum(K_xy) / num_combos_xy)
-        return mmd, exp_object
+
+        if slim_output:
+            return mmd
+        else:
+            return mmd, exp_object
     else:
         if len(arr1.shape) == 1:
             arr1 = np.reshape(arr1, [-1, 1])
@@ -57,28 +62,19 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False):
         mmd = (np.sum(K_xx_upper) / num_combos_x +
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
-        return mmd, exp_object
+        if slim_output:
+            return mmd
+        else:
+            return mmd, exp_object
 
 
-def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
+def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
     """Computes k-mmd^2 between two numpy arrays of same size.
-    
-    The projection of a distribution into the RKHS defined by the Gaussian
-    kernel, is equivalent to the inner product of eigenfunctions containing
-    Hermite polynomials. Truncating this basis of eigenfunctions, by computing 
-    an inner product over only the first k, (ideally) satisfies the goals
-    of k-mmd.
-    """
-    # Constants used in Hermite polynomials. See Rasmussen (4.40).
-    # http://www.gaussianprocess.org/gpml/chapters/RW.pdf
-    kernel_sigma = 1.
-    kernel_l = 1.
-    basis_a = 1. / (4. * kernel_sigma**2)
-    basis_b = 1. / (2. * kernel_l**2)
-    basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
-    const1 = basis_c - basis_a
-    const2 = np.sqrt(2. * basis_c)
 
+    NOTE: Currently, all calculations are for k=2, i.e. a metric that matches
+      the first two moments.
+    
+    """
     if sigma_list is None:
         sigma_list = [1.0]
 
@@ -109,7 +105,10 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
                tf.reduce_sum(K_yy_upper) / num_combos_y -
                2 * tf.reduce_sum(K_xy) / num_combos_xy)
-        return mmd, exp_object
+        if slim_output:
+            return mmd
+        else:
+            return mmd, exp_object
         """
     else:
         if len(arr1.shape) == 1:
@@ -128,14 +127,21 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
         v_sq_tiled_T = np.transpose(v_sq_tiled)
 
 
-
+        #######################################################################
         # TODO: FIGURE OUT WHICH K TO USE.
         # Construct polynomial representation of kernel, i.e. result of inner
         # product of first k bases.
-        options = ['hermite', 'eigenfn', 'polynomial_kernel']
-        option = options[2]
+        options = ['hermite', 'eigenfn', 'polynomial_kernel', 'rbf_taylor']
+        option = options[3]
 
         if option == 'hermite':
+            """
+            The projection of a distribution into the RKHS defined by the Gaussian
+            kernel, is equivalent to the inner product of eigenfunctions containing
+            Hermite polynomials. Truncating this basis of eigenfunctions, by computing 
+            an inner product over only the first k, (ideally) satisfies the goals
+            of k-mmd.
+            """
             # This is probably incorrect, since it needs the eigenvals.
             hermite_probabilist = \
                 2. + VVT + VVT_sq - v_sq_tiled - v_sq_tiled_T  
@@ -146,6 +152,17 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
         elif option == 'eigenfn':
             # See slide 47, showing that kernel uses eigenvalue, too. Add it.
             # http://mlss.tuebingen.mpg.de/2015/slides/gretton/part_1.pdf
+
+            # Constants used in Hermite polynomials. See Rasmussen (4.40).
+            # http://www.gaussianprocess.org/gpml/chapters/RW.pdf
+            kernel_sigma = 1.
+            kernel_l = 1.
+            basis_a = 1. / (4. * kernel_sigma**2)
+            basis_b = 1. / (2. * kernel_l**2)
+            basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
+            const1 = basis_c - basis_a
+            const2 = np.sqrt(2. * basis_c)
+
             # Below, eigenfn derivation. See p.2, kmmd_with_eigenfunctions.pdf.
             eigenfn_poly = 5. + 4.*(const2**2)*VVT + 16.*(const2**4)*VVT_sq - \
                 8.*(const2**2)*v_sq_tiled - 8.*(const2**2)*v_sq_tiled_T
@@ -160,7 +177,6 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
                 K = np.exp(-1. * K)
             elif 1:
                 K = np.power(1e0 * VVT + c, num_moments)
-
             verbose = 0
             if verbose:
                 K0 = np.power(VVT + c, num_moments)
@@ -175,6 +191,16 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
                 print(np.min(K4), np.max(K4))
                 pdb.set_trace()
 
+        elif option == 'rbf_taylor':
+            exp_object = v_sq_tiled - 2 * VVT + v_sq_tiled_T 
+            K = 0.0
+            for sigma in sigma_list:
+                gamma = 1.0 / (2.0 * sigma**2)
+                exp_object_with_gamma = -gamma * exp_object
+                # Taylor expansion with up-to-k-order terms
+                K += 1 + exp_object_with_gamma + \
+                    np.power(exp_object_with_gamma, 2) / math.factorial(2) 
+        #######################################################################
 
 
         K_xx = K[:n1, :n1]
@@ -187,4 +213,8 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False):
         kmmd = (np.sum(K_xx_upper) / num_combos_x +
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
-        return kmmd, K 
+
+        if slim_output:
+            return kmmd
+        else:
+            return kmmd, K 

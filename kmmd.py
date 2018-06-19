@@ -4,11 +4,11 @@ from mmd_utils import compute_mmd, compute_kmmd
 
 
 # Define slim versions with only one ouput.
-def compute_mmd_(x, y):
-    out, _ = compute_mmd(x, y)
+def compute_mmd_(x, y, sigma_list=None):
+    out, _ = compute_mmd(x, y, sigma_list=sigma_list)
     return out
-def compute_kmmd_(x, y):
-    out, _ = compute_kmmd(x, y)
+def compute_kmmd_(x, y, sigma_list=None):
+    out, _ = compute_kmmd(x, y, sigma_list=sigma_list)
     return out
 
 
@@ -20,6 +20,7 @@ def compute_moments(x):
 def get_mmds(sample_size):
     num_runs = 100
 
+    # Set up containers for resuls.
     mmds_norm_gamma = np.zeros(num_runs)
     kmmds_norm_gamma = np.zeros(num_runs)
     kmmds_norm_norm = np.zeros(num_runs)
@@ -29,18 +30,30 @@ def get_mmds(sample_size):
 
     for i in range(num_runs):
         # Define distributions to sample.
+        """
         x = np.random.normal(1, 1, size=sample_size)
         y = np.random.gamma(1, 1, size=sample_size)
         z = np.random.normal(1, 1, size=sample_size)
+        """
+        x = np.random.normal(10, 5, size=sample_size)
+        y = np.random.gamma(20, 0.5, size=sample_size)
+        z = np.random.normal(10, 5, size=sample_size)
+
+        # Center and norm the data.
         x = (x - np.mean(x)) / np.std(x)
         y = (y - np.mean(y)) / np.std(y)
         z = (z - np.mean(z)) / np.std(z)
-        mmds_norm_gamma[i] = compute_mmd_(x, y)
-        kmmds_norm_gamma[i] = compute_kmmd_(x, y)
-        kmmds_norm_norm[i] = compute_kmmd_(x, z)
+        
+        # Compute metrics: reference, desired metric, comparison.
+        mmds_norm_gamma[i] = compute_mmd(x, y, slim_output=True)
+        kmmds_norm_gamma[i] = compute_kmmd(x, y, slim_output=True)
+        kmmds_norm_norm[i] = compute_kmmd(x, z, slim_output=True)
+
+        # Store empirical moments.
         x_moments[i] = compute_moments(x)
         y_moments[i] = compute_moments(y)
         z_moments[i] = compute_moments(z)
+
     return (mmds_norm_gamma, kmmds_norm_gamma, kmmds_norm_norm,
             x_moments, y_moments, z_moments)
 
