@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/home/maurice/mmd')
 import pdb
 import numpy as np
 from mmd_utils import compute_mmd, compute_kmmd

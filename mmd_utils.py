@@ -10,10 +10,10 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
     if sigma_list is None:
         sigma_list = [1.0]
 
-    n1 = len(arr1)
-    n2 = len(arr2)
-
     if use_tf:
+        n1 = arr1.get_shape().as_list()[0]
+        n2 = arr2.get_shape().as_list()[0]
+
         v = tf.concat([arr1, arr2], 0)
         VVT = tf.matmul(v, tf.transpose(v))
         sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
@@ -34,12 +34,15 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
         mmd = (tf.reduce_sum(K_xx_upper) / num_combos_x +
                tf.reduce_sum(K_yy_upper) / num_combos_y -
                2 * tf.reduce_sum(K_xy) / num_combos_xy)
-
         if slim_output:
             return mmd
         else:
             return mmd, exp_object
+
     else:
+        n1 = len(arr1)
+        n2 = len(arr2)
+
         if len(arr1.shape) == 1:
             arr1 = np.reshape(arr1, [-1, 1])
             arr2 = np.reshape(arr2, [-1, 1])
@@ -78,22 +81,27 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
     if sigma_list is None:
         sigma_list = [1.0]
 
-    n1 = len(arr1)
-    n2 = len(arr2)
-
     if use_tf:
-        pass
-        # TODO: Update this with kMMD.
-        """
+        n1 = arr1.get_shape().as_list()[0]
+        n2 = arr2.get_shape().as_list()[0]
+
         v = tf.concat([arr1, arr2], 0)
         VVT = tf.matmul(v, tf.transpose(v))
+
         sqs = tf.reshape(tf.diag_part(VVT), [-1, 1])
         sqs_tiled_horiz = tf.tile(sqs, tf.transpose(sqs).get_shape())
-        #exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+        exp_object = sqs_tiled_horiz - 2 * VVT + tf.transpose(sqs_tiled_horiz)
+
         K = 0.0
         for sigma in sigma_list:
             gamma = 1.0 / (2.0 * sigma**2)
-            K += tf.exp(-gamma * exp_object)
+            #K += tf.exp(-gamma * exp_object)
+
+            # Taylor expansion with up-to-k-order terms
+            exp_object_with_gamma = -gamma * exp_object
+            K += 1 + exp_object_with_gamma + \
+                np.power(exp_object_with_gamma, 2) / math.factorial(2) 
+
         K_xx = K[:n1, :n1]
         K_yy = K[n1:, n1:]
         K_xy = K[:n1, n1:]
@@ -108,9 +116,12 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
         if slim_output:
             return mmd
         else:
-            return mmd, exp_object
-        """
+            return mmd, K 
+        
     else:
+        n1 = len(arr1)
+        n2 = len(arr2)
+
         if len(arr1.shape) == 1:
             arr1 = np.reshape(arr1, [-1, 1])
             arr2 = np.reshape(arr2, [-1, 1])
@@ -118,13 +129,13 @@ def compute_kmmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
         # Stack inputs, and create outer product, giving pairwise elements.
         v = np.concatenate((arr1, arr2), 0)
         VVT = np.matmul(v, np.transpose(v))
-        v_sq = v ** 2 
-        VVT_sq = np.matmul(v_sq, np.transpose(v_sq))
 
         # Tiling facilitates addition of squared terms (in 1st and 2nd
         # positions of the kernel, e.g. +x^2 or +y^2.
+        v_sq = np.reshape(np.diag(VVT), [-1, 1])
         v_sq_tiled = np.tile(v_sq, [1, v_sq.shape[0]])
         v_sq_tiled_T = np.transpose(v_sq_tiled)
+        VVT_sq = np.matmul(v_sq, np.transpose(v_sq))
 
 
         #######################################################################
