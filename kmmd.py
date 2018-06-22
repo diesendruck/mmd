@@ -5,15 +5,6 @@ import numpy as np
 from mmd_utils import compute_mmd, compute_kmmd
 
 
-# Define slim versions with only one ouput.
-def compute_mmd_(x, y, sigma_list=None):
-    out, _ = compute_mmd(x, y, sigma_list=sigma_list)
-    return out
-def compute_kmmd_(x, y, sigma_list=None):
-    out, _ = compute_kmmd(x, y, sigma_list=sigma_list)
-    return out
-
-
 def compute_moments(x):
     m = [np.mean(x), np.mean(x**2), np.mean(x**3), np.mean(x**4)]
     return m
