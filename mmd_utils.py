@@ -2,6 +2,8 @@ import math
 import pdb
 import numpy as np
 import tensorflow as tf
+from scipy.spatial.distance import pdist, cdist
+
 
 
 
@@ -113,8 +115,8 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
             return mmd, exp_object
 
 
-def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
-        use_tf=False, slim_output=False):
+def compute_kmmd(arr1, arr2, k_moments=2, kernel_choice='rbf_taylor',
+        sigma_list=None, use_tf=False, slim_output=False, verbose=False):
     """Computes k-mmd^2 between two numpy arrays of same size.
 
     NOTE: Currently, all calculations are for k=2, i.e. a metric that matches
@@ -137,9 +139,9 @@ def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
         v_sq_tiled = tf.tile(v_sq, [1, v_sq.get_shape().as_list()[0]])
         v_sq_tiled_T = tf.transpose(v_sq_tiled)
 
-        if kernel == 'polynomial':
+        if kernel_choice == 'poly':
             K = tf.pow(poly_a * VVT + poly_c, k_moments)
-        elif kernel == 'rbf_taylor':
+        elif kernel_choice == 'rbf_taylor':
             exp_object = v_sq_tiled - 2 * VVT + v_sq_tiled_T 
             K = 0.0
             for sigma in sigma_list:
@@ -172,45 +174,8 @@ def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
         v_sq_tiled_T = np.transpose(v_sq_tiled)
         VVT_sq = np.matmul(v_sq, np.transpose(v_sq))
 
-        """
-        if kernel == 'hermite':
-            # The projection of a distribution into the RKHS defined by the Gaussian
-            # kernel, is equivalent to the inner product of eigenfunctions containing
-            # Hermite polynomials. Truncating this basis of eigenfunctions, by computing 
-            # an inner product over only the first k, (ideally) satisfies the goals
-            # of k-mmd.
-            # This is probably incorrect, since it needs the eigenvals.
-            hermite_probabilist = \
-                2. + VVT + VVT_sq - v_sq_tiled - v_sq_tiled_T  
-            hermite_physicist = \
-                5. + 4.*VVT + 16.*VVT_sq - 8.*v_sq_tiled - 8.*v_sq_tiled_T
-            K = hermite_probabilist
-
-        elif kernel == 'eigenfn':
-            # See slide 47, showing that kernel uses eigenvalue, too. Add it.
-            # http://mlss.tuebingen.mpg.de/2015/slides/gretton/part_1.pdf
-
-            # Constants used in Hermite polynomials. See Rasmussen (4.40).
-            # http://www.gaussianprocess.org/gpml/chapters/RW.pdf
-            kernel_sigma = 1.
-            kernel_l = 1.
-            basis_a = 1. / (4. * kernel_sigma**2)
-            basis_b = 1. / (2. * kernel_l**2)
-            basis_c = np.sqrt(basis_a**2 + 2.*basis_a*basis_b)
-            const1 = basis_c - basis_a
-            const2 = np.sqrt(2. * basis_c)
-
-            # Below, eigenfn derivation. See p.2, kmmd_with_eigenfunctions.pdf.
-            eigenfn_poly = 5. + 4.*(const2**2)*VVT + 16.*(const2**4)*VVT_sq - \
-                8.*(const2**2)*v_sq_tiled - 8.*(const2**2)*v_sq_tiled_T
-            eigenfn_exp = -1. * const1 * (v_sq_tiled - v_sq_tiled_T)
-            K = eigenfn_poly * np.exp(eigenfn_exp) 
-        """
-
-        if kernel == 'polynomial':
+        if kernel_choice == 'poly':
             K = np.power(poly_a * VVT + poly_c, k_moments)
-            """
-            verbose = 0
             if verbose:
                 K0 = np.power(VVT + c, num_moments)
                 K1 = np.exp(np.power(VVT + c, num_moments))
@@ -223,8 +188,8 @@ def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
                 print(np.min(K3), np.max(K3))
                 print(np.min(K4), np.max(K4))
                 pdb.set_trace()
-            """
-        elif kernel == 'rbf_taylor':
+
+        elif kernel_choice == 'rbf_taylor':
             exp_object = v_sq_tiled - 2 * VVT + v_sq_tiled_T 
             K = 0.0
             for sigma in sigma_list:
@@ -233,22 +198,22 @@ def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
                 # For troubleshooting, regular RBF:
                 #K += np.exp(-gamma * exp_object)
 
+        else:
+            raise ValueError('kernel choice not in ["poly", "rbf_taylor"')
+
 
         kmmd = get_mmd_from_K(K, n1, n2)
 
-        """
-        verbose = 0
         if verbose:
             reg = np.exp(-gamma * exp_object)
-            tay = taylor(exp_object_with_gamma, 2)
+            tay = taylor(-gamma * exp_object, 2)
             minmax(exp_object, 'exp_object')
-            minmax(exp_object_with_gamma, 'exp_object_with_gamma')
+            minmax(-gamma * exp_object, 'exp_object_with_gamma')
             minmax(reg, 'reg')
             minmax(tay, 'tay')
-            kmmd_tay = get_mmd_from_K(K_tay, n1, n2)
+            kmmd_tay = get_mmd_from_K(K, n1, n2)
             print('kmmd: {:.4f}\nkmmd_tay: {:.4f}'.format(kmmd, kmmd_tay))
             pdb.set_trace()
-        """
 
         if slim_output:
             return kmmd
@@ -256,28 +221,84 @@ def compute_kmmd(arr1, arr2, k_moments=2, kernel='rbf_taylor', sigma_list=None,
             return kmmd, K 
 
 
-def compute_cmd(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None, cmd_b=None):
+def compute_central_moments(d, k_moments=2, use_tf=False):
+    """Computes central moments of data in NumPy array."""
+    if use_tf:
+        d_mean = tf.reduce_mean(d, axis=0)
+        d_moments = [d_mean]
+        for i in range(2, k_moments + 1):
+            d_moment_i = tf.reduce_mean(tf.pow(d - d_mean, i), axis=0)
+            d_moments.append(d_moment_i)
+        return d_moments
+
+    else:
+        d_mean = np.mean(d, axis=0)
+        #d_moments = [list(np.round(d_mean, 4))]
+        d_moments = [d_mean]
+        for i in range(2, k_moments + 1):
+            d_moment_i = np.mean(np.power(d - d_mean, i), axis=0)
+            d_moments.append(d_moment_i)
+        return d_moments
+
+
+def compute_moments(arr, k_moments=2):
+    m = []
+    for i in range(1, k_moments+1):
+        m.append(np.round(np.mean(arr**i), 4))
+    return m
+
+
+def compute_cmd(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None, cmd_b=None,
+        return_terms=False, fractional_step=None):
     """Computes Central Moment Discrepancy between two numpy arrays of same size.
 
-    NOTE: Currently, all calculations are for k=2, i.e. a metric that matches
-      the first two moments.
+    cmd_a: Min on data.
+    cmd_b: Max on data.
+    cmd_gamma: Float. Scales exponent of each CMD term's coefficient. Decreasing
+      this from 1 toward 0, slows the decay of weights on the higher-order
+      terms, i.e. it becomes more sensitive to higher-order moments.
     
     """
     assert (cmd_a is not None) and (cmd_b is not None), 'define cmd_a, cmd_b'
     span_const = 1. / np.abs(cmd_b - cmd_a)
 
+    # Cumulatively sum the CMD, and also collect individual terms.
+    cmd = 0
+    terms = []
+
     if use_tf:
         arr1_mean = tf.reduce_mean(arr1, axis=0)
         arr2_mean = tf.reduce_mean(arr2, axis=0)
 
-        cmd = span_const * tf.norm(arr1_mean - arr2_mean, ord=2)
-        for i in range(2, k_moments + 1):
-            cmd += span_const**i * tf.norm(
-                tf.reduce_mean(tf.pow(arr1 - arr1_mean, i), axis=0) -
-                tf.reduce_mean(tf.pow(arr2 - arr2_mean, i), axis=0))
-        return cmd 
+        first_term = span_const * tf.norm(arr1_mean - arr2_mean, ord=2)
+        cmd += first_term
+        terms.append(first_term)
+
+        if not fractional_step:
+            for k in range(2, k_moments + 1):
+                # Compute k'th central moment, and add to collections.
+                #   || c_k(arr1 - mean1) - c_k(arr2 - mean2) ||
+                term_k = (span_const**k) * tf.norm(
+                    tf.reduce_mean(tf.pow(arr1 - arr1_mean, k), axis=0) -
+                    tf.reduce_mean(tf.pow(arr2 - arr2_mean, k), axis=0))
+                cmd += term_k
+                terms.append(term_k)
+        else:
+            for k in np.arange(1 + fractional_step, k_moments + fractional_step):
+                # Compute k'th central moment, and add to collections.
+                #   || c_k(arr1 - mean1) - c_k(arr2 - mean2) ||
+                term_k = (span_const**k) * tf.norm(
+                    tf.reduce_mean(tf.pow(tf.abs(arr1 - arr1_mean), k), axis=0) -
+                    tf.reduce_mean(tf.pow(tf.abs(arr2 - arr2_mean), k), axis=0))
+                cmd += term_k
+                terms.append(term_k)
+
+        if return_terms:
+            return cmd, terms 
+        else:
+            return cmd
         
-    elif not use_tf:
+    else:
         if len(arr1.shape) == 1:
             arr1 = np.reshape(arr1, [-1, 1])
             arr2 = np.reshape(arr2, [-1, 1])
@@ -285,19 +306,84 @@ def compute_cmd(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None, cmd_b=None):
         arr1_mean = np.mean(arr1, axis=0)
         arr2_mean = np.mean(arr2, axis=0)
 
-        # Store moments for diagnostics.
-        moments_data = [list(np.round(arr1_mean, 4))]
-        moments_gens = [list(np.round(arr2_mean, 4))]
+        first_term = span_const * np.linalg.norm(arr1_mean - arr2_mean)
+        cmd += first_term
+        terms.append(first_term)
 
-        cmd = span_const * np.linalg.norm(arr1_mean - arr2_mean)
-        for i in range(2, k_moments + 1):
-            # Compute moments and add to metric.
-            moment_i_data = np.mean(np.power(arr1 - arr1_mean, i), axis=0)
-            moment_i_gens = np.mean(np.power(arr2 - arr2_mean, i), axis=0)
-            cmd += span_const**i * np.linalg.norm(moment_i_data - moment_i_gens)
+        for k in range(2, k_moments + 1):
+            # Compute k'th moment, and add to collections.
+            term_k = (span_const**k) * np.linalg.norm(
+                np.mean(np.power(arr1 - arr1_mean, k), axis=0) -
+                np.mean(np.power(arr2 - arr2_mean, k), axis=0))
+            cmd += term_k
+            terms.append(term_k)
 
-            # Store moments.
-            moments_data.append(list(np.round(moment_i_data, 4)))
-            moments_gens.append(list(np.round(moment_i_gens, 4)))
+        if return_terms:
+            return cmd, terms
+        else:
+            return cmd
 
-        return cmd, moments_data, moments_gens 
+
+def compute_energy(x, y, use_tf=False, method='linear'):
+    """Distances are euclidean.
+    See: https://github.com/syrte/ndtest/blob/master/ndtest.py
+    """
+    dx, dy, dxy = pdist(x), pdist(y), cdist(x, y)
+    n, m = len(x), len(y)
+    if method == 'log':
+        dx, dy, dxy = np.log(dx), np.log(dy), np.log(dxy)
+    elif method == 'gaussian':
+        raise NotImplementedError
+    elif method == 'linear':
+        pass
+    else:
+        raise ValueError
+    z = dxy.sum() / (n * m) - dx.sum() / n**2 - dy.sum() / m**2
+    # z = ((n*m)/(n+m)) * z # ref. SR
+    return z
+
+
+# The following measures the MMD between a sample and the standard Gaussian.
+#   Implementation is for TF. From Guy:
+#     https://github.com/guywcole/nn/blob/master/mmd.py
+def differences(X, Y, m=None, n=None, p=None):
+    p = int(X.shape[1])
+    m = int(X.shape[0])
+    n = int(Y.shape[0])
+    return tf.tile(tf.reshape(X, [m, 1, p]), [1, n, 1]) - tf.tile(tf.reshape(Y, [1, n, p]), [m, 1, 1])
+def MMD_vs_Normal_by_filter(X, filters, sigmas=[1.]):
+    """Measures difference from sample X to standard Gaussian.
+    For a single group, use filters = [X.shape[0], 1].
+    """
+    assert X.dtype == filters.dtype, 'filters dtype ({}) must match that of data ({})'.format(filters.dtype, X.dtype)
+    distances = tf.reduce_sum(tf.square(differences(X, X)), axis=-1)
+    p = int(X.shape[1])
+    N, num_sets = [int(val) for val in filters.shape]
+    Ns = tf.reshape(tf.reduce_sum(filters, axis=0, keepdims=False), [num_sets, 1])
+    eps = tf.constant(1e-8, dtype=X.dtype)
+    mmds_1vN = [[0. for i in range(num_sets)] for j in range(len(sigmas))]
+    X2 = tf.reduce_sum(tf.square(X), 1, keepdims=True)
+    tf_pi = tf.constant(np.pi, dtype=X.dtype)
+    for j in range(len(sigmas)):
+        sigma = sigmas[j]
+        
+        a = tf.constant(-.5 * p * np.log(2. * np.pi * sigma ** 2), distances.dtype)
+        b = tf.constant(-.5 / sigma ** 2, distances.dtype)
+        xx_embeddings = tf.exp(a + b * distances)
+        sum_xx_embeddings = tf.diag_part(tf.matmul(tf.matmul(tf.transpose(filters), xx_embeddings), filters))
+        mean_xx_embeddings = (tf.reshape(sum_xx_embeddings, [-1, 1]) - Ns * tf.exp(a))/(Ns * (Ns - 1) + eps)
+        
+        c = -tf.log(tf.sqrt(2. * tf_pi * (1. + tf.square(sigma))))
+        d = (-1. / 2.) / (1. + tf.square(sigma))
+        sum_xy_embeddings = tf.matmul(tf.transpose(filters), tf.exp(c + d * X2))
+        mean_xy_embeddings = sum_xy_embeddings / (Ns + eps)
+        
+        mean_yy_embeddings = tf.ones_like(mean_xx_embeddings) / tf.sqrt(2. * tf_pi * (2 + tf.square(sigma)))
+        
+        # Concatenate SquareX, SquareY, and XY terms.
+        mmds_1vN[j] = tf.concat([mean_xx_embeddings, mean_yy_embeddings, -2. * mean_xy_embeddings], 1)
+    
+    mmds_1vN = tf.convert_to_tensor(mmds_1vN)
+    # Mo added: Compute sum in order to return MMD as real number.
+    result = tf.reduce_sum(mmds_1vN)
+    return result
