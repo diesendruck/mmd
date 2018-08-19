@@ -11,14 +11,15 @@
     No guarantees are made w.r.t the efficiency of these implementations.
 """
 import numpy as np
+import pdb
 from sklearn.neighbors import NearestNeighbors
 from scipy.spatial import KDTree
 
 
 def knn_distance(point, sample, k):
-    """ Euclidean distance from `point` to it's `k`-Nearest
+    """ Euclidean distance from `point` to its `k`-Nearest
     Neighbour in `sample` """
-    norms = np.linalg.norm(sample-point, axis=1)
+    norms = np.linalg.norm(sample - point, axis=1)
     return np.sort(norms)[k]
 
 
@@ -43,6 +44,9 @@ def naive_estimator(s1, s2, k=1):
     d = float(s1.shape[1])
 
     for p1 in s1:
+        # P(x=p1) is approximated by 1 / knn_distance(p1, s1). Here, called `1 / rho`.
+        # Q(x=p1) is approximated by 1 / knn_distance(p1, s2). Here, called `1 / nu`.
+        # Want log[P()/Q()]. Here, can do `nu/rho`.
         nu = knn_distance(p1, s2, k-1)  # -1 because 'p1' is not in 's2'
         rho = knn_distance(p1, s1, k)
         D += (d/n)*np.log(nu/rho)

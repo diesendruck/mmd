@@ -1,10 +1,13 @@
 import math
 import pdb
 import numpy as np
+import sys
+sys.path.append('/home/maurice/mmd')
 import tensorflow as tf
+from kl_estimators import naive_estimator as naive_kl
+from kl_estimators import scipy_estimator as scipy_kl
+from kl_estimators import skl_estimator as skl_kl
 from scipy.spatial.distance import pdist, cdist
-
-
 
 
 def minmax(x, label=''):
@@ -347,9 +350,12 @@ def compute_energy(x, y, use_tf=False, method='linear'):
 #   Implementation is for TF. From Guy:
 #     https://github.com/guywcole/nn/blob/master/mmd.py
 def differences(X, Y, m=None, n=None, p=None):
-    p = int(X.shape[1])
-    m = int(X.shape[0])
-    n = int(Y.shape[0])
+    #p = int(X.shape[1])
+    #m = int(X.shape[0])
+    #n = int(Y.shape[0])
+    p = tf.shape(X)[1]
+    m = tf.shape(X)[0]
+    n = tf.shape(Y)[0]
     return tf.tile(tf.reshape(X, [m, 1, p]), [1, n, 1]) - tf.tile(tf.reshape(Y, [1, n, p]), [m, 1, 1])
 def MMD_vs_Normal_by_filter(X, filters, sigmas=[1.]):
     """Measures difference from sample X to standard Gaussian.
@@ -387,3 +393,43 @@ def MMD_vs_Normal_by_filter(X, filters, sigmas=[1.]):
     # Mo added: Compute sum in order to return MMD as real number.
     result = tf.reduce_sum(mmds_1vN)
     return result
+
+
+def privacy_risk(arr, loss_type='mmd'):
+    """Measures how difficult it is to privatize a data set.
+      
+      The more the 'shape' of a distribution depends on a single point, the
+      harder it is to privatize. Each point i has an effect on the shape,
+      measured by the MMD between the full data set, and the full data set
+      with point i removed. If the distributions with vs without i are very
+      different (high MMD), then point i is important to the original shape,
+      and point i is difficult to privatize, i.e. it is an outlier.
+
+      The privacy risk is a fixed description for a given data set.
+    """
+    n = len(arr)
+    omission_risks = np.zeros((n, 1)) 
+
+    for i in range(n):
+        arr_less_i = np.delete(arr, i, axis=0)
+        if loss_type == 'mmd':
+            omission_risks[i] = compute_mmd(arr, arr_less_i, slim_output=True) 
+        elif loss_type == 'kl':
+            omission_risks[i] = naive_kl(arr, arr_less_i, k=2) 
+            test = naive_kl(np.random.normal(0,1,(100, 1)), np.random.normal(4,1,(100, 1)), k=1)
+            print(test)
+            pdb.set_trace()
+            #omission_risks[i] = scipy_kl(arr, arr_less_i, k=2) 
+            #omission_risks[i] = skl_kl(arr, arr_less_i, k=2) 
+        #elif loss_type == 'log_ratio_hists':
+        #    # QUERY FN
+        #    query = lambda x: np.mean(x) 
+        #    response_arr = query(arr)
+        #    response_arr_less_i = query(arr_less_i)
+        #    #hist_bin_edges = np.arange(np.floor(min(arr)), np.ceil(max(arr))+1)
+        #    #hist_arr, _ = np.histogram(arr, bins=hist_bin_edges)
+        #    #hist_arr_less_i, _ = np.histogram(arr_less_i, bins=hist_bin_edges)
+        #    omission_risks[i] = np.abs(response_arr - response_arr_less_i)
+
+    privacy_risk = np.max(omission_risks)
+    return privacy_risk, omission_risks
