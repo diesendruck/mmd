@@ -236,7 +236,6 @@ def compute_central_moments(d, k_moments=2, use_tf=False):
 
     else:
         d_mean = np.mean(d, axis=0)
-        #d_moments = [list(np.round(d_mean, 4))]
         d_moments = [d_mean]
         for i in range(2, k_moments + 1):
             d_moment_i = np.mean(np.power(d - d_mean, i), axis=0)
@@ -252,16 +251,20 @@ def compute_moments(arr, k_moments=2):
 
 
 def compute_cmd(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None, cmd_b=None,
-        return_terms=False, fractional_step=None):
+        return_terms=False):
     """Computes Central Moment Discrepancy between two numpy arrays of same size.
 
+    arr1: Data array.
+    arr2: Secondary array (possibly simulated).
+    k_moments: Integer number of moments to compute.
+    use_tf: Boolean, to use TensorFlow instead of NumPy version.
     cmd_a: Min on data.
     cmd_b: Max on data.
-    cmd_gamma: Float. Scales exponent of each CMD term's coefficient. Decreasing
-      this from 1 toward 0, slows the decay of weights on the higher-order
-      terms, i.e. it becomes more sensitive to higher-order moments.
-    
+    return_terms: Boolean, whether to return the list of moment discrepancies.
     """
+
+    # Validate inputs.
+    assert arr1.shape[1] == arr2.shape[1], 'arr elems must have same dim'
     assert (cmd_a is not None) and (cmd_b is not None), 'define cmd_a, cmd_b'
     span_const = 1. / np.abs(cmd_b - cmd_a)
 
@@ -277,30 +280,147 @@ def compute_cmd(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None, cmd_b=None,
         cmd += first_term
         terms.append(first_term)
 
-        if not fractional_step:
-            for k in range(2, k_moments + 1):
-                # Compute k'th central moment, and add to collections.
-                #   || c_k(arr1 - mean1) - c_k(arr2 - mean2) ||
-                term_k = (span_const**k) * tf.norm(
-                    tf.reduce_mean(tf.pow(arr1 - arr1_mean, k), axis=0) -
-                    tf.reduce_mean(tf.pow(arr2 - arr2_mean, k), axis=0))
-                cmd += term_k
-                terms.append(term_k)
-        else:
-            for k in np.arange(1 + fractional_step, k_moments + fractional_step):
-                # Compute k'th central moment, and add to collections.
-                #   || c_k(arr1 - mean1) - c_k(arr2 - mean2) ||
-                term_k = (span_const**k) * tf.norm(
-                    tf.reduce_mean(tf.pow(tf.abs(arr1 - arr1_mean), k), axis=0) -
-                    tf.reduce_mean(tf.pow(tf.abs(arr2 - arr2_mean), k), axis=0))
-                cmd += term_k
-                terms.append(term_k)
+        for k in range(2, k_moments + 1):
+            # Compute k'th central moment, and add to collections.
+            #   || c_k(arr1 - mean1) - c_k(arr2 - mean2) ||
+            term_k = (span_const**k) * tf.norm(
+                tf.reduce_mean(tf.pow(arr1 - arr1_mean, k), axis=0) -
+                tf.reduce_mean(tf.pow(arr2 - arr2_mean, k), axis=0))
+            cmd += term_k
+            terms.append(term_k)
 
         if return_terms:
             return cmd, terms 
         else:
             return cmd
         
+    else:
+        if len(arr1.shape) == 1:
+            arr1 = np.reshape(arr1, [-1, 1])
+            arr2 = np.reshape(arr2, [-1, 1])
+
+        arr1_mean = np.mean(arr1, axis=0)
+        arr2_mean = np.mean(arr2, axis=0)
+
+        first_term = span_const * np.linalg.norm(arr1_mean - arr2_mean)
+        cmd += first_term
+        terms.append(first_term)
+
+        for k in range(2, k_moments + 1):
+            # Compute k'th moment, and add to collections.
+            term_k = (span_const**k) * np.linalg.norm(
+                np.mean(np.power(arr1 - arr1_mean, k), axis=0) -
+                np.mean(np.power(arr2 - arr2_mean, k), axis=0))
+            cmd += term_k
+            terms.append(term_k)
+
+        if return_terms:
+            return cmd, terms
+        else:
+            return cmd
+
+
+def dp_sensitivity_to_expectation(arr, fn):
+    """Computes differential privacy sensitivity for an expectation function.
+
+    arr: Numpy array.
+    fn: An expectation function over the entire array, returning a value of dim
+      arr.shape[1].
+
+    """
+
+    fn_vals = np.zeros(arr.shape[0])
+    for i in range(len(arr)):
+        arr_less_i = np.delete(arr, i, axis=0)
+        fn_vals[i] = fn(arr_less_i)
+
+    sensitivity = np.max(fn_vals) - np.min(fn_vals)
+    return sensitivity
+
+
+def compute_kth_central_moment(arr, k, use_tf=False):
+    assert k >= 2, 'k must be >= 2'
+    if use_tf:
+        arr_mean = tf.reduce_mean(arr, axis=0)
+        result = tf.reduce_mean(tf.pow(arr - arr_mean, k), axis=0)
+    else:
+        arr_mean = np.mean(arr, axis=0)
+        result = np.mean(np.power(arr - arr_mean, k), axis=0)
+    return result
+
+
+def compute_noncentral_noisy(arr1, arr2, k_moments=2, use_tf=False, cmd_a=None,
+        cmd_b=None, return_terms=False, batch_id=None,
+        fixed_batches_sensitivities=None):
+    """Computes NonCentral Moment Discrepancy between two numpy arrays of same size.
+
+    arr1: Data array.
+    arr2: Secondary array (possibly simulated).
+    k_moments: Integer number of moments to compute.
+    use_tf: Boolean, to use TensorFlow instead of NumPy version.
+    cmd_a: Min on data.
+    cmd_b: Max on data.
+    return_terms: Boolean, whether to return the list of moment discrepancies.
+    """
+
+    # Validate inputs.
+    assert arr1.shape[1] == arr2.shape[1], 'arr elems must have same dim'
+    assert (cmd_a is not None) and (cmd_b is not None), 'define cmd_a, cmd_b'
+    span_const = 1. / np.abs(cmd_b - cmd_a)
+    assert ((fixed_batches_sensitivities is not None) and
+            (batch_id is not None)), 'must include sens and id to add noise'
+
+    # Cumulatively sum the CMD, and also collect individual terms.
+    cmd = 0
+    terms = []
+
+    # TensorFlow version.
+    if use_tf:
+        # Fetch sensitivities for this batch.
+        sensitivities = tf.reshape(
+            tf.gather(fixed_batches_sensitivities, [batch_id]),
+            [-1, 1])
+
+        # Inputs for order 1 term of CMD.
+        arr1_mean = tf.reduce_mean(arr1, axis=0)
+        arr2_mean = tf.reduce_mean(arr2, axis=0)
+
+        # Compute noisy 'query' results for order 1 term.
+        eps = 1
+        m1_sens = tf.gather(sensitivities, 0)
+        m1_laplace = tf.distributions.Laplace(loc=0., scale=m1_sens/eps)
+        m1_laplace_noise = m1_laplace.sample(1)
+        q1_noisy = m1_laplace_noise + arr1_mean
+
+        # Collect and store results.
+        first_term = span_const * tf.norm(q1_noisy - arr2_mean, ord=2)
+        cmd += first_term
+        terms.append(first_term)
+
+        # Subsequent terms of noncentral moment discrepancy.
+        for k in range(2, k_moments + 1):
+            mk_sens = tf.gather(sensitivities, k - 1)
+            mk_laplace = tf.distributions.Laplace(loc=0., scale=mk_sens/eps)
+            mk_laplace_noise = mk_laplace.sample(1)
+            qk_noisy = (
+                mk_laplace_noise +
+                tf.reduce_mean(tf.pow(arr1, k), axis=0))
+                #tf.reduce_mean(tf.pow(arr1 - arr1_mean, k), axis=0))
+
+            term_k = (span_const**k) * tf.norm(
+                qk_noisy - 
+                tf.reduce_mean(tf.pow(arr2, k), axis=0))
+                #tf.reduce_mean(tf.pow(arr2 - arr2_mean, k), axis=0))
+
+            cmd += term_k
+            terms.append(term_k)
+
+        if return_terms:
+            return cmd, terms 
+        else:
+            return cmd
+        
+    # NumPy version.
     else:
         if len(arr1.shape) == 1:
             arr1 = np.reshape(arr1, [-1, 1])
