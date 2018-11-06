@@ -28,10 +28,13 @@ else:
 for f in filenames:
     risk = np.loadtxt(open(f, 'rb'), delimiter=',')
     risk = risk[-10:]
+    # Risk has two columns: Sensitivity and Precision.
     mean_sensitivity, mean_precision = np.mean(risk, axis=0)
     std_sensitivity, std_precision = np.std(risk, axis=0)
     print('\nEvaluated file: {}'.format(f))
-    print('  Sensitivity (mean +- std) = {:.4f} +- {:.4f}'.format(
-        mean_sensitivity, std_sensitivity))
-    print('  Precision (mean +- std) = {:.4f} +- {:.4f}'.format(
-        mean_precision, std_precision))
+    print('  Sensitivity (mean, +- 2 * std) = {:.4f}, [{:.4f}, {:.4f}]'.format(
+        mean_sensitivity, mean_sensitivity - 2 * std_sensitivity,
+        mean_sensitivity + 2 * std_sensitivity))
+    print('  Precision (mean, +- 2 * std) = {:.4f}, [{:.4f}, {:.4f}]'.format(
+        mean_precision, mean_precision - 2 * std_precision,
+        mean_precision + 2 * std_precision))
