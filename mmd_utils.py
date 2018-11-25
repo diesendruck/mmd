@@ -41,8 +41,8 @@ def get_mmd_from_K(K, n1, n2, use_tf=False):
                tf.reduce_sum(K_yy_upper) / num_combos_y -
                2 * tf.reduce_sum(K_xy) / (n1 * n2))
     else:
-        K_xx_upper = np.triu(K_xx)
-        K_yy_upper = np.triu(K_yy)
+        K_xx_upper = np.triu(K_xx, 1)
+        K_yy_upper = np.triu(K_yy, 1)
         mmd = (np.sum(K_xx_upper) / num_combos_x +
                np.sum(K_yy_upper) / num_combos_y -
                2 * np.sum(K_xy) / (n1 * n2))
@@ -105,8 +105,8 @@ def compute_mmd(arr1, arr2, sigma_list=None, use_tf=False, slim_output=False):
         K_xx = K[:n1, :n1]
         K_yy = K[n1:, n1:]
         K_xy = K[:n1, n1:]
-        K_xx_upper = np.triu(K_xx)
-        K_yy_upper = np.triu(K_yy)
+        K_xx_upper = np.triu(K_xx, 1)
+        K_yy_upper = np.triu(K_yy, 1)
         num_combos_x = n1 * (n1 - 1) / 2
         num_combos_y = n2 * (n2 - 1) / 2
         mmd = (np.sum(K_xx_upper) / num_combos_x +
