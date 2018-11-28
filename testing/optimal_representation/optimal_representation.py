@@ -17,23 +17,21 @@ import sys
 def str2bool(v):
         return v.lower() in ('true', '1')
 parser = argparse.ArgumentParser()
-parser.add_argument('--num_data', type=int, default=10000)
-parser.add_argument('--chunk_size', type=int, default=200)
-parser.add_argument('--proposals_per_chunk', type=int, default=10)
+parser.add_argument('--num_data', type=int, default=10)
+parser.add_argument('--num_support', type=int, default=5)
+parser.add_argument('--dist', type=str, default='energy')
 parser.add_argument('--lr', type=float, default=1.)
 parser.add_argument('--sigma', type=float, default=1.)
-parser.add_argument('--max_iter', type=int, default=501)
+parser.add_argument('--max_iter', type=int, default=500)
 parser.add_argument('--save_iter', type=int, default=500)
 parser.add_argument('--email', type=str2bool, default=False)
-parser.add_argument('--data_source', type=str, default='correlated',
-    choices=['gaussian', 'file', 'correlated'])
+parser.add_argument('--data_source', type=str, default='gaussian')
 parser.add_argument('--corr', type=float, default=0.6, help='On [-1, 1]')
-parser.add_argument('--plot', type=str2bool, default=False)
 parser.add_argument('--test', type=str2bool, default=False)
 args = parser.parse_args()
 num_data = args.num_data
-chunk_size = args.chunk_size
-proposals_per_chunk = args.proposals_per_chunk
+num_support = args.num_support
+dist = args.dist
 lr = args.lr
 sigma = args.sigma
 max_iter = args.max_iter
@@ -41,7 +39,6 @@ save_iter = args.save_iter
 email = args.email
 data_source = args.data_source
 corr = args.corr
-plot = args.plot
 test = args.test
 
 
@@ -65,12 +62,18 @@ def generate_data(n, data_source):
         else:
             data = np.random.normal(0, 0.5, n)
         return data
+    elif data_source == 'gaussian_with_outlier':
+        n_c1 = 1
+        n_c2 = n - n_c1
+        data = np.concatenate((np.random.normal(6, 1, n_c1),
+                               np.random.normal(0, 1, n_c2)))
+        return data
     elif data_source == 'file':
         with open('samp.dat') as f:
             data = [line.split() for line in f]
             data = np.array([float(d[1]) for d in data if len(d) == 2])
             return data[:2000]
-    else:  # Generate correlated data.
+    elif data_source == 'correlated':
         data = np.zeros(n)
         data[0] = np.random.normal()
         for i in xrange(1, n):
@@ -84,7 +87,6 @@ def generate_data(n, data_source):
         plt.savefig('orig_data.png'); plt.close()
 
         if test:
-            num_proposals = num_data / chunk_size * proposals_per_chunk
             x_bars = []
             for i in range(1000):
                 data = np.zeros(n)
@@ -93,12 +95,14 @@ def generate_data(n, data_source):
                     data[i] = (data[i - 1] * corr +
                         np.sqrt(1 - corr**2) * np.random.normal())
                 x_bars.append(np.mean(
-                    np.random.choice(data, num_proposals, replace=False)))
-            print 'num proposals = {}'.format(num_proposals) 
-            print '1/{} = {}'.format(num_proposals, 1./num_proposals)
-            print 'var(x_bars) = {}'.format(np.var(x_bars))
+                    np.random.choice(data, num_support, replace=False)))
+            print('num support = {}'.format(num_support))
+            print('1/{} = {}'.format(num_support, 1./num_support))
+            print('var(x_bars) = {}'.format(np.var(x_bars)))
             sys.exit('exited on test within generate_data')
         return data
+    else:
+        sys.exit('--data_source not valid')
 
 
 def energy(data, gen, sigma=1.):
@@ -117,8 +121,8 @@ def energy(data, gen, sigma=1.):
       gradients_e: Numpy array of energy gradients for each proposal point.
       gradients_mmd: Numpy array of mmdgradients for each proposal point.
     '''
-    x = list(data)
-    y = list(gen)
+    x = sorted(list(data))
+    y = sorted(list(gen))
     data_num = len(x)
     gen_num = len(y)
     num_combos_yy = gen_num * (gen_num - 1) / 2.
@@ -149,13 +153,14 @@ def energy(data, gen, sigma=1.):
            2. / data_num / gen_num * np.sum(K_xy))
 
     # Compute energy gradients.
+    # TODO: CHECK WHETHER THIS GRADIENT IS CORRECT.
     signed = np.sign(pairwise_difs)
     signed_yx = signed[data_num:, :data_num]
     signed_yy = signed[data_num:, data_num:]
     gradients_e = []
     for i in range(gen_num):
         grad_yi = (2. / gen_num / data_num * sum(signed_yx[i]) - 
-                   1. / gen_num / gen_num * sum(signed_yy[i]))
+                   2. / gen_num / gen_num * sum(signed_yy[i]))
         gradients_e.append(grad_yi)
     
     # Compute MMD gradients.
@@ -172,16 +177,15 @@ def energy(data, gen, sigma=1.):
                    
         gradients_mmd.append(grad_yi)
 
-    #return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
     return e, mmd, np.array(gradients_e), np.array(gradients_mmd)
 
 
-def optimize(partition, gen, n=5000, learning_rate=1e-2, dist='mmd',
+def optimize(data, gen, n=5000, learning_rate=1e-2, dist='mmd',
              sigma=1.):
     '''Runs alternating optimizations, n times through proposal points.
 
     Args:
-      partition: 1D numpy array of any length, e.g. 100.
+      data: 1D numpy array of any length, e.g. 100.
       gen: 1D numpy array of any length, e.g. 10.
       n: Scalar, number of times to loop through updates for all vars.
       learning_rate: Scalar, amount to move point with each gradient update.
@@ -191,108 +195,71 @@ def optimize(partition, gen, n=5000, learning_rate=1e-2, dist='mmd',
     Returns:
       gens: 2D numpy array of trace of generated proposal points.
     '''
-    e, mmd, _, _ = energy(partition, gen, sigma=sigma)
+    e, mmd, _, _ = energy(data, gen, sigma=sigma)
     gens = np.zeros((n, len(gen)))
-    #print '\nit0: gen:{}, e: {:.8f}, mmd: {:.8f}'.format(np.sort(gen), e, mmd)
-    print '\n  it0: e: {:.8f}, mmd: {:.8f}'.format(e, mmd)
+    print('\n  it0: e: {:.8f}, mmd: {:.8f}'.format(e, mmd))
     gens[0, :] = gen
     for it in range(1, n):
-        _, mmd_d_g, _, grads_mmd_d_g = energy(partition, gen, sigma=sigma) 
-        gen -= learning_rate * grads_mmd_d_g
+        e_, mmd_, grads_e_, grads_mmd_ = energy(data, gen, sigma=sigma) 
+        if dist == 'energy':
+            grads_ = grads_e_
+        elif dist == 'mmd':
+            grads_ = grads_mmd_
+        gen -= learning_rate * grads_
         gens[it, :] = gen
 
         if it % save_iter == 0 or it == (n - 1):
-            print '\n  it{}: mmd_d_g: {:.6f}'.format(it, mmd_d_g)
-            #print np.sort(gen)
-
-            print '\n  P: min,med,mean,max: {:4f},{:3f},{:3f},{:3f}'.format(
-                np.min(partition), np.median(partition), np.mean(partition),
-                np.max(partition))
-            g = gens[:it]
-            print '  Gens: min,med,mean,max: {:3f},{:3f},{:3f},{:3f}'.format(
-                np.min(g), np.median(g), np.mean(g), np.max(g))
-            if plot:
-                plot_results(partition, q, q_orig, g, save_tag)
+            print('\n  it{}: e_, mmd_: {:.6f}'.format(it, e_, mmd_))
+            print('\n  P: min,med,mean,max: {:4f},{:3f},{:3f},{:3f}'.format(
+                np.min(data), np.median(data), np.mean(data),
+                np.max(data)))
+            g = gens[it]
+            print('  Gens: min,med,mean,max: {:3f},{:3f},{:3f},{:3f}'.format(
+                np.min(g), np.median(g), np.mean(g), np.max(g)))
 
     return gens
 
 
-def plot_results(p, q, q_orig, gens_out, save_tag):
-    # Plot results.
-    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(10,6))
-    plt.suptitle('P_m, Q_n, m={}, n={}'.format(len(p), len(q)))
-    ax1.plot(gens_out, 'k-', alpha=0.3)
-    ax1.set_xlabel('Iteration')
-    ax1.set_ylabel('Value of proposals Q_n')
-    ax1.set_title('Proposals, Q_n')
-    ax1.set_ylim([-4,4])
-    ax2.hist(p, bins=30, color='green', alpha=0.3, normed=True,
-             orientation='horizontal', label='data')
-    ax2.hist(gens_out[-1, :], bins=30, color='black', alpha=0.3, normed=True,
-             orientation='horizontal', label='proposals')
-    ax2.set_title('Data, P_m')
-    ax2.legend()
-    ax2.set_ylim([-4,4])
-    plt.savefig('particles_{}.png'.format(save_tag))
+def plot_results(gens_out, num_data, p, num_support, save_tag, email=False):
+    data_markers_x = [gens_out.shape[0]] * num_data
+    data_markers_y = p
+    plt.plot(gens_out, 'k-', alpha=0.3);
+    plt.scatter(data_markers_x, data_markers_y, marker='x')
+    plt.title('Support points, |data|={}, |support|={}, '.format(
+              num_data, num_support))
+    plt.savefig('support_points_path.png'); plt.close()
     plt.close()
 
-    # Email resulting plots.
     if email:
         os.system(
             ('echo $PWD -- {} | mutt momod@utexas.edu -s '
-             '"optimal_representation particles" -a "particles_{}.png"').format(
-                save_tag, save_tag))
-        print '  Emailed particles.png'
+             '"optimal_representation support points" -a '
+             '"support_points_path.png"').format(save_tag, save_tag))
+        print('Emailed support_points.png')
 
 
-# BEGIN MAIN RUN.
-m = 1
-x_bars = []
-for i in range(m):
-    print '\n\nEXPERIMENT {}\n'.format(i)
+
+def main():
     p_orig = generate_data(num_data, data_source)
-    num_data = len(p_orig)
     p = np.random.permutation(p_orig)
-    partitions = [p[i: i + chunk_size] for i in xrange(0, len(p), chunk_size)]
 
-    save_tag = 'data{}_corr{}_nd{}_chunk{}_ppc{}_it{}_lr{}_sig{}'.format(
-        data_source, corr, num_data, chunk_size, proposals_per_chunk, max_iter,
-        lr, sigma)
-    print '  Config: {}'.format(save_tag)
+    save_tag = 'data{}_corr{}_nd{}_supp{}_it{}_lr{}_sig{}'.format(
+        data_source, corr, num_data, num_support, max_iter, lr, sigma)
+    print('save_tag: {}'.format(save_tag))
+    print('\nOptimizing with {}'.format(dist))
 
-    all_proposals = np.array([])
+    eps = 1e-1
+    q_orig = np.linspace(min(p) + eps, max(p) - eps, num_support)
+    q = list(q_orig)
+    gens_out = optimize(p, q, n=max_iter, learning_rate=lr, dist=dist,
+                        sigma=sigma)
 
-    for j, partition in enumerate(partitions):
-        print '\nWorking on partition {}'.format(j)
-        q_orig = np.linspace(min(partition), max(partition),
-            proposals_per_chunk)
-        #q_orig = np.random.uniform(min(partition), max(partition),
-        #    proposals_per_chunk)
-        q = list(q_orig)
+    # Plot generated proposals.
+    plot_results(gens_out, num_data, p, num_support, save_tag, email=True)
 
-        gens_out = optimize(partition, q, n=max_iter, learning_rate=lr,
-            sigma=sigma)
-        if plot:
-            plot_results(partition, q, q_orig, gens_out, save_tag)
+    # Compute variance of x_bars.
+    np.save('support_points_path.npy', gens_out)
 
-        all_proposals = np.concatenate(
-            (all_proposals, gens_out[-1, :]))
 
-    # Plot all generated proposals together.
-    plt.hist(all_proposals, 30);
-    plt.title('All proposals, n={}'.format(len(all_proposals)))
-    plt.savefig('all_proposals.png'); plt.close()
-    plt.close()
-
-    x_bar = np.mean(all_proposals)
-    x_bars.append(x_bar)
-    with open('x_bars.txt', 'a') as f:
-        f.write('\n{}'.format(x_bar))
-
-# Compute variance of x_bars.
-np.save('all_proposals.npy', all_proposals)
-num_proposals_generated = num_data / chunk_size * proposals_per_chunk
-print 'n = {}'.format(num_proposals_generated)
-print '1/n = {}'.format(1. / num_proposals_generated)
-print 'var(x_bars) = {}'.format(np.var(x_bars))
-print 'x_bar = {}'.format(x_bar)
+if __name__ == "__main__":
+    main() 
